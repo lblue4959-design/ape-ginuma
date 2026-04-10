@@ -1,0 +1,1285 @@
+<!DOCTYPE html>
+<html lang="si">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>අපේ ගිණුම්</title>
+  
+  <script>
+    window.onerror = function(msg, url, line) {
+      if(msg.includes('Script error')) return true;
+      console.log("Error: " + msg);
+      return false;
+    };
+  </script>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+  
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: {} }
+    }
+  </script>
+
+  <style>
+    body { -webkit-tap-highlight-color: transparent; transition: background-color 0.3s; }
+    .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="bg-slate-50 text-gray-800 font-sans dark:bg-gray-900 dark:text-gray-100 transition-colors">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDlEkpabHwMNYq2OKrK9ivE6xCQ7_UlqTE",
+      authDomain: "apeginum.firebaseapp.com",
+      projectId: "apeginum",
+      storageBucket: "apeginum.firebasestorage.app",
+      messagingSenderId: "1030809742719",
+      appId: "1:1030809742719:web:33981031dcaed87b04be4a",
+      measurementId: "G-804TT4JSL4"
+    };
+
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    const sinhalaMonths = ['ජනවාරි', 'පෙබරවාරි', 'මාර්තු', 'අප්‍රේල්', 'මැයි', 'ජූනි', 'ජූලි', 'අගෝස්තු', 'සැප්තැම්බර්', 'ඔක්තෝබර්', 'නොවැම්බර්', 'දෙසැම්බර්'];
+    const sinhalaDays = ['ඉරිදා', 'සඳුදා', 'අඟහරුවාදා', 'බදාදා', 'බ්‍රහස්පතින්දා', 'සිකුරාදා', 'සෙනසුරාදා'];
+    
+    const getTodayDate = () => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    };
+    
+    const getCurrentTimeString = () => {
+      return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+    };
+
+    const getCurrentPeriodId = () => {
+      const now = new Date();
+      let y = now.getFullYear(), m = now.getMonth() + 1, d = now.getDate();
+      if (d >= 21) { m++; if (m > 12) { m = 1; y++; } }
+      return `${y}-${m.toString().padStart(2, '0')}`;
+    };
+
+    const formatPeriodDisplay = (pid) => {
+      if (!pid) return "";
+      const [y, m] = pid.split('-').map(Number);
+      const end = sinhalaMonths[m - 1];
+      let sIdx = m - 2, sY = y;
+      if (sIdx < 0) { sIdx = 11; sY--; }
+      return `${sinhalaMonths[sIdx]} 21 - ${end} 20 (${y})`;
+    };
+
+    const formatTimeDisplay = (date) => date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    const formatDateDisplay = (date) => {
+      const d = date.getDate();
+      const m = sinhalaMonths[date.getMonth()];
+      const y = date.getFullYear();
+      const dayName = sinhalaDays[date.getDay()];
+      return `${y} ${m} ${d}, ${dayName}`;
+    };
+
+    const defaultMonthData = {
+      incomes: [
+        { id: 1, name: 'Vajira', days: '', amount: '' },
+        { id: 2, name: 'Nalaka', days: '', amount: '' },
+        { id: 3, name: 'Shan', days: '', amount: '' },
+        { id: 4, name: 'Tharusha', days: '', amount: '' },
+      ],
+      shoppingList: [],
+      expenses: [],
+      categories: ['ගෑස්', 'ලයිට් බිල්', 'වතුර බිල්', 'වෙනත්'],
+      logs: [], 
+      pendingBills: [] 
+    };
+
+    const defaultSettings = {
+      adminPin: "2026",
+      pastPin: "1896",
+      logPin: "1896"
+    };
+
+    function App() {
+      const [currentUser, setCurrentUser] = useState(null);
+      const [selectedLoginName, setSelectedLoginName] = useState("");
+      const [customName, setCustomName] = useState("");
+      const [loginStep, setLoginStep] = useState(1);
+      const [pinInput, setPinInput] = useState("");
+      const [userPins, setUserPins] = useState({});
+      const [appSettings, setAppSettings] = useState(defaultSettings);
+
+      const [activeTab, setActiveTab] = useState('dashboard');
+      const [currentMonth, setCurrentMonth] = useState(null);
+      const [availableMonths, setAvailableMonths] = useState([]);
+      const [allData, setAllData] = useState({});
+      const [isLoading, setIsLoading] = useState(true);
+      
+      const [isAdmin, setIsAdmin] = useState(false);
+      const [isPastUnlocked, setIsPastUnlocked] = useState(false);
+      const [isLogUnlocked, setIsLogUnlocked] = useState(false);
+      
+      const [currentTime, setCurrentTime] = useState(new Date());
+      const [themeColor, setThemeColor] = useState('blue');
+      const [isDarkMode, setIsDarkMode] = useState(false);
+      const [toasts, setToasts] = useState([]);
+      const [deferredPrompt, setDeferredPrompt] = useState(null);
+
+      const [newIncomeName, setNewIncomeName] = useState('');
+      const [newShoppingItem, setNewShoppingItem] = useState('');
+      const [newCategory, setNewCategory] = useState('');
+      const [newExpense, setNewExpense] = useState({ category: 'ගෑස්', amount: '', date: getTodayDate(), receipt: null });
+      const [shoppingReceipt, setShoppingReceipt] = useState(null);
+      const [newPendingBill, setNewPendingBill] = useState({ name: '', amount: '', date: getTodayDate() });
+      
+      const [expandedStmt, setExpandedStmt] = useState(null);
+      const [viewingShoppingListId, setViewingShoppingListId] = useState(null);
+      const [viewingImage, setViewingImage] = useState(null);
+
+      const pendingUpdates = useRef({});
+      const saveTimerRef = useRef(null);
+
+      const themes = {
+        blue: { primary: 'blue-600', bg: 'blue-50', text: 'blue-900', hover: 'blue-700' },
+        green: { primary: 'emerald-600', bg: 'emerald-50', text: 'emerald-900', hover: 'emerald-700' },
+        red: { primary: 'rose-600', bg: 'rose-50', text: 'rose-900', hover: 'rose-700' }
+      };
+      const th = themes[themeColor] || themes['blue'];
+
+      useEffect(() => {
+        const timerId = setInterval(() => setCurrentTime(new Date()), 1000);
+        
+        try {
+            if (localStorage.getItem('theme') === 'dark') { 
+                setIsDarkMode(true); 
+                document.documentElement.classList.add('dark'); 
+            }
+            const savedColor = localStorage.getItem('themeColor');
+            if (savedColor && themes[savedColor]) {
+                setThemeColor(savedColor);
+            }
+        } catch (e) {}
+
+        const handleVisibilityChange = () => {
+          if (document.visibilityState === 'hidden') {
+            setIsAdmin(false);
+            setIsPastUnlocked(false);
+            setIsLogUnlocked(false);
+          }
+        };
+        document.addEventListener("visibilitychange", handleVisibilityChange);
+
+        return () => {
+          clearInterval(timerId);
+          document.removeEventListener("visibilitychange", handleVisibilityChange);
+        };
+      }, []);
+
+      const toggleDarkMode = () => {
+        setIsDarkMode(!isDarkMode);
+        if (!isDarkMode) { 
+            document.documentElement.classList.add('dark'); 
+            localStorage.setItem('theme', 'dark'); 
+        } else { 
+            document.documentElement.classList.remove('dark'); 
+            localStorage.setItem('theme', 'light'); 
+        }
+      };
+
+      const changeThemeColor = () => {
+        const colors = ['blue', 'green', 'red'];
+        const currentIndex = colors.indexOf(themeColor) !== -1 ? colors.indexOf(themeColor) : 0;
+        const nextColor = colors[(currentIndex + 1) % colors.length];
+        setThemeColor(nextColor);
+        localStorage.setItem('themeColor', nextColor);
+      };
+
+      const showToast = (msg, type = 'success') => {
+        const id = Date.now();
+        setToasts(prev => [...prev, { id, msg, type }]);
+        setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
+      };
+
+      const handleInstallClick = () => {
+        if (deferredPrompt) {
+          deferredPrompt.prompt();
+          deferredPrompt.userChoice.then(() => setDeferredPrompt(null));
+        }
+      };
+
+      const toggleAdmin = () => {
+        if (isAdmin) { 
+            setIsAdmin(false); 
+            setIsPastUnlocked(false); 
+            showToast("ලොක් කරන ලදී", "info"); 
+        } else {
+          const pin = prompt("මුරපදය ඇතුළත් කරන්න:");
+          if (pin === appSettings.adminPin) { 
+              setIsAdmin(true); 
+              showToast(`සාර්ථකව ලොග් විය!`, "success"); 
+          } else if (pin !== null) { 
+              alert("මුරපදය වැරදියි!"); 
+          }
+        }
+      };
+
+      const handleUnlockPastMonth = () => {
+        const pin = prompt("අවසන් වූ මාසයක් වෙනස් කිරීමට විශේෂ මුරපදය දෙන්න (PIN):");
+        if (pin === appSettings.pastPin) {
+            setIsPastUnlocked(true);
+            showToast("මාසය අන්ලොක් විය!", "success");
+        } else if (pin !== null) {
+            alert("මුරපදය වැරදියි!");
+        }
+      };
+
+      const fetchData = () => {
+        setIsLoading(true);
+        const fetchMonths = db.collection('artifacts').doc('ape-ginum-app').collection('public').doc('data').collection('months').get();
+        const fetchPins = db.collection('artifacts').doc('ape-ginum-app').collection('public').doc('userPins').get();
+        const fetchSettings = db.collection('artifacts').doc('ape-ginum-app').collection('public').doc('settings').get();
+
+        Promise.all([fetchMonths, fetchPins, fetchSettings]).then(([snap, pinsSnap, settingsSnap]) => {
+          const dataObj = {};
+          let mIds = [];
+          snap.forEach(d => { dataObj[d.id] = d.data(); mIds.push(d.id); });
+          
+          const realCurMonth = getCurrentPeriodId();
+          if (!mIds.includes(realCurMonth)) {
+            mIds.push(realCurMonth);
+            dataObj[realCurMonth] = defaultMonthData;
+            db.collection('artifacts').doc('ape-ginum-app').collection('public').doc('data').collection('months').doc(realCurMonth).set(defaultMonthData).catch(console.error);
+          }
+          
+          const validIds = mIds.filter(id => id <= realCurMonth);
+          const sortedIds = [...new Set(validIds)].sort().reverse();
+          
+          setAvailableMonths(sortedIds);
+          setAllData(dataObj);
+          setCurrentMonth(prev => prev && validIds.includes(prev) ? prev : sortedIds[0]);
+
+          if(pinsSnap.exists) { setUserPins(pinsSnap.data() || {}); } 
+          else { setUserPins({}); }
+
+          if(settingsSnap.exists && Object.keys(settingsSnap.data()).length > 0) {
+             setAppSettings(settingsSnap.data());
+          } else {
+             setAppSettings(defaultSettings);
+          }
+
+          setIsLoading(false);
+        }).catch(err => {
+          setIsLoading(false);
+          showToast("දත්ත ලබා ගැනීමේ දෝෂයක්.", "error");
+        });
+      };
+
+      useEffect(() => { fetchData(); }, []);
+
+      const localData = allData[currentMonth] || defaultMonthData;
+      const incomes = localData.incomes || [];
+      const shoppingList = localData.shoppingList || [];
+      const expenses = localData.expenses || [];
+      const categories = localData.categories || [];
+      const logs = localData.logs || [];
+      const pendingBills = localData.pendingBills || [];
+
+      const realCurrentMonth = getCurrentPeriodId();
+      const isPastMonth = currentMonth !== null && currentMonth < realCurrentMonth;
+      const canEdit = isAdmin && (!isPastMonth || isPastUnlocked);
+
+      const userNames = useMemo(() => {
+        if (!allData || !currentMonth) return [];
+        const incomesList = allData[currentMonth]?.incomes || [];
+        return Array.from(new Set(incomesList.map(inc => inc.name).filter(n => n && n.trim() !== '')));
+      }, [allData, currentMonth]);
+
+      useEffect(() => { 
+         if (userNames.length > 0 && !selectedLoginName) {
+             try {
+                 const savedName = localStorage.getItem('savedLoginName');
+                 if (savedName && userNames.includes(savedName)) { setSelectedLoginName(savedName); } 
+                 else { setSelectedLoginName(userNames[0]); } 
+             } catch (e) { setSelectedLoginName(userNames[0]); }
+         }
+      }, [userNames, selectedLoginName]);
+
+      const totalIncome = incomes.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+      const totalShoppingPrice = shoppingList.reduce((s, c) => s + (Number(c.price) || 0), 0);
+      const manualExpenses = expenses.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+      const totalExpense = manualExpenses + totalShoppingPrice;
+      
+      const broughtForward = useMemo(() => {
+        if (!allData || !currentMonth) return 0;
+        const sortedMonths = Object.keys(allData).sort();
+        let balance = 0;
+        for (const mId of sortedMonths) {
+          if (mId === currentMonth) break; 
+          const d = allData[mId];
+          const inc = (d.incomes || []).reduce((s, c) => s + (Number(c.amount)||0), 0);
+          const exp = (d.expenses || []).reduce((s, c) => s + (Number(c.amount)||0), 0) + (d.shoppingList || []).reduce((s, c) => s + (Number(c.price)||0), 0);
+          balance += (inc - exp);
+        }
+        return balance;
+      }, [allData, currentMonth]);
+
+      const balance = broughtForward + totalIncome - totalExpense;
+
+      const prevMonthData = useMemo(() => {
+        if (!availableMonths || availableMonths.length === 0 || !currentMonth) return null;
+        const sortedIds = [...availableMonths].sort().reverse();
+        const currentIndex = sortedIds.indexOf(currentMonth);
+        if(currentIndex !== -1 && currentIndex < sortedIds.length - 1) return allData[sortedIds[currentIndex + 1]];
+        return null;
+      }, [availableMonths, currentMonth, allData]);
+
+      const prevMonthExpense = prevMonthData ? 
+        (prevMonthData.expenses || []).reduce((s, c) => s + (Number(c.amount)||0), 0) + 
+        (prevMonthData.shoppingList || []).reduce((s, c) => s + (Number(c.price)||0), 0) : 0;
+      
+      const expenseDiff = prevMonthData ? totalExpense - prevMonthExpense : 0;
+
+      const categoryTotals = useMemo(() => {
+        const totals = {};
+        expenses.forEach(exp => { totals[exp.category] = (totals[exp.category] || 0) + Number(exp.amount); });
+        if (totalShoppingPrice > 0) totals['බඩු ලැයිස්තුව'] = (totals['බඩු ලැයිස්තුව'] || 0) + totalShoppingPrice;
+        return Object.entries(totals).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount);
+      }, [expenses, totalShoppingPrice]);
+      
+      const maxCategoryAmount = Math.max(...categoryTotals.map(c => c.amount), 1);
+
+      const globalStatement = useMemo(() => {
+        const stmt = [];
+        Object.entries(allData).forEach(([mId, monthData]) => {
+          (monthData.incomes || []).forEach(inc => {
+            if(Number(inc.amount) > 0) stmt.push({ ...inc, type: 'income', title: inc.name, displayDate: mId, time: inc.time, amount: Number(inc.amount) });
+          });
+          (monthData.expenses || []).forEach(exp => {
+            stmt.push({ ...exp, type: 'expense', title: exp.category, displayDate: exp.date || mId, time: exp.time, amount: Number(exp.amount), items: exp.items, receipt: exp.receipt });
+          });
+        });
+        return stmt.sort((a, b) => b.id - a.id);
+      }, [allData]);
+
+      const updateLocalData = (field, value) => {
+        setAllData(prev => ({ ...prev, [currentMonth]: { ...(prev[currentMonth] || defaultMonthData), [field]: value } }));
+        pendingUpdates.current[field] = value;
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = setTimeout(() => {
+          if (currentMonth && Object.keys(pendingUpdates.current).length > 0) {
+            const updates = { ...pendingUpdates.current };
+            pendingUpdates.current = {}; 
+            db.collection('artifacts').doc('ape-ginum-app').collection('public').doc('data').collection('months').doc(currentMonth).set(updates, { merge: true });
+          }
+        }, 1000);
+      };
+
+      const addLog = (actionType, details, userOverride) => {
+        const user = userOverride || currentUser;
+        if (user === "Vajira") return; // Admin exclusion
+
+        const userPrefix = user ? `[${user}] ` : '';
+        const newLog = { id: Date.now(), date: getTodayDate(), time: getCurrentTimeString(), action: actionType, details: userPrefix + details };
+        updateLocalData('logs', [newLog, ...logs]);
+      };
+
+      const saveSettings = () => {
+         if(!appSettings.adminPin || !appSettings.logPin || !appSettings.pastPin) return showToast("මුරපද හිස්ව තැබිය නොහැක!", "error");
+         db.collection('artifacts').doc('ape-ginum-app').collection('public').doc('settings').set(appSettings);
+         addLog("ප්‍රධාන මුරපද වෙනස් කළා", "පද්ධතියේ ප්‍රධාන මුරපද යාවත්කාලීන විය.");
+         showToast("මුරපද සාර්ථකව වෙනස් කළා!");
+      };
+
+      const handleLoginNext = () => {
+         const finalName = selectedLoginName === 'NEW' ? customName.trim() : selectedLoginName;
+         if(finalName) { 
+            setLoginStep(2); 
+            try {
+                const savedPin = localStorage.getItem(`savedPin_${finalName}`);
+                if (savedPin) setPinInput(savedPin); else setPinInput(""); 
+            } catch(e) { setPinInput(""); }
+         }
+      };
+
+      const handleLoginConfirm = () => {
+         const finalName = selectedLoginName === 'NEW' ? customName.trim() : selectedLoginName;
+         if (!pinInput.trim()) return showToast("කරුණාකර PIN අංකය ඇතුළත් කරන්න!", "error"); 
+
+         if (userPins[finalName]) {
+             if (userPins[finalName] === pinInput) {
+                 setCurrentUser(finalName);
+                 try { localStorage.setItem('savedLoginName', finalName); localStorage.setItem(`savedPin_${finalName}`, pinInput); } catch(e){}
+                 addLog("ඇප් එකට පිවිසීම", `ඇප් එකට ලොග් විය.`, finalName);
+             } else { showToast("PIN අංකය වැරදියි!", "error"); }
+         } else {
+             const updatedPins = { ...userPins, [finalName]: pinInput };
+             setUserPins(updatedPins);
+             db.collection('artifacts').doc('ape-ginum-app').collection('public').doc('userPins').set(updatedPins, {merge: true});
+             setCurrentUser(finalName);
+             try { localStorage.setItem('savedLoginName', finalName); localStorage.setItem(`savedPin_${finalName}`, pinInput); } catch(e){}
+             addLog("ඇප් එකට පිවිසීම", `නව ගිණුමක් සාදා ඇප් එකට ලොග් විය.`, finalName);
+         }
+      };
+      
+      const handleResetUserPin = (userName) => {
+         if(confirm(`"${userName}" ගේ PIN අංකය මකා දැමීමට අවශ්‍යද?`)) {
+            const updatedPins = { ...userPins };
+            delete updatedPins[userName];
+            setUserPins(updatedPins);
+            db.collection('artifacts').doc('ape-ginum-app').collection('public').doc('userPins').set(updatedPins);
+            try { localStorage.removeItem(`savedPin_${userName}`); } catch(e){}
+            addLog("PIN අංකය රිසෙට් කළා", `${userName} ගේ ලොගින් PIN එක මකා දැමුවා.`);
+            showToast(`${userName} ගේ PIN එක රිසෙට් කළා!`);
+         }
+      };
+
+      // === අලුත්: 100% ක් වැඩ කරන Share ක්‍රමය (Text විදිහට) ===
+      const getReportText = () => {
+          let text = `📊 *අපේ ගිණුම් - ${formatPeriodDisplay(currentMonth)}*\n\n`;
+          text += `💰 *ආදායම:* Rs. ${totalIncome.toLocaleString()}\n`;
+          text += `📉 *වියදම:* Rs. ${totalExpense.toLocaleString()}\n`;
+          text += `⚖️ *ඉතිරිය (Balance):* Rs. ${balance.toLocaleString()}\n\n`;
+          
+          if (categoryTotals.length > 0) {
+              text += `*--- වියදම් සාරාංශය ---*\n`;
+              categoryTotals.forEach(cat => {
+                  text += `▪ ${cat.name}: Rs. ${cat.amount.toLocaleString()}\n`;
+              });
+              text += `\n`;
+          }
+
+          text += `*--- සම්පූර්ණ ප්‍රකාශනය ---*\n`;
+          const currentMonthStatements = globalStatement.filter(item => item.displayDate === currentMonth || (item.displayDate && item.displayDate.startsWith(currentMonth)));
+          
+          if(currentMonthStatements.length > 0) {
+              currentMonthStatements.forEach(item => {
+                  let icon = item.type === 'income' ? '🟢' : '🔴';
+                  let sign = item.type === 'income' ? '+' : '-';
+                  text += `${icon} ${item.title}: ${sign}Rs. ${item.amount.toLocaleString()}\n`;
+              });
+          } else {
+              text += `තවම කිසිවක් සටහන් කර නැත.\n`;
+          }
+          return text;
+      };
+
+      // WhatsApp එකට යැවීම
+      const shareToWhatsApp = () => {
+          const text = getReportText();
+          const encodedText = encodeURIComponent(text);
+          // ඇප් එක ඇතුළේ වැඩ කරන්න href එක පාවිච්චි කරනවා
+          window.location.href = `https://wa.me/?text=${encodedText}`;
+      };
+
+      // Share Menu එකෙන් යැවීම හෝ Copy කිරීම
+      const nativeShare = () => {
+          const text = getReportText();
+          if (navigator.share) {
+              navigator.share({
+                  title: 'අපේ ගිණුම් වාර්තාව',
+                  text: text
+              }).catch(err => {
+                  console.log("Share cancelled", err);
+              });
+          } else {
+              try {
+                  navigator.clipboard.writeText(text).then(() => {
+                      showToast("වාර්තාව Copy කරගත්තා! දැන් ඕනෙම තැනක Paste කරන්න.", "success");
+                  }).catch(() => {
+                      alert("කරුණාකර මෙය Copy කරගන්න:\n\n" + text);
+                  });
+              } catch(e) {
+                  alert("කරුණාකර මෙය Copy කරගන්න:\n\n" + text);
+              }
+          }
+      };
+
+      const handleAddCategory = () => {
+        if (!canEdit) return;
+        if (newCategory.trim() && !categories.includes(newCategory.trim())) {
+          updateLocalData('categories', [...categories, newCategory.trim()]);
+          setNewExpense({...newExpense, category: newCategory.trim()});
+          addLog("නව කාණ්ඩයක් සෑදුවා", newCategory.trim());
+          setNewCategory('');
+        }
+      };
+
+      const handleAddIncome = (e) => {
+        e.preventDefault();
+        if (!canEdit || !newIncomeName.trim()) return;
+        updateLocalData('incomes', [...incomes, { id: Date.now(), name: newIncomeName.trim(), days: '', amount: '', time: getCurrentTimeString() }]);
+        addLog("නව ආදායම් මාර්ගයක්", newIncomeName.trim());
+        setNewIncomeName('');
+        showToast("ආදායම් මාර්ගය එකතු කළා");
+      };
+
+      const deleteIncome = (inc) => { 
+        if (canEdit && confirm("මෙය මකා දැමීමට අවශ්‍යද?")) {
+          updateLocalData('incomes', incomes.filter(i => i.id !== inc.id)); 
+          addLog("ආදායමක් මැකුවා", `${inc.name} (Rs.${inc.amount})`);
+          showToast("මකා දමන ලදී", "info");
+        }
+      };
+
+      const handleIncomeChange = (id, field, value) => { if (!canEdit) return; updateLocalData('incomes', incomes.map(inc => inc.id === id ? { ...inc, [field]: value } : inc)); };
+
+      const processImage = (file, callback) => {
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const scaleSize = 600 / img.width;
+            canvas.width = 600; 
+            canvas.height = img.height * scaleSize;
+            canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+            callback(canvas.toDataURL('image/jpeg', 0.6));
+          };
+          img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+      };
+
+      const handleAddExpense = (e) => {
+        e.preventDefault();
+        if (!canEdit || !newExpense.amount) return;
+        updateLocalData('expenses', [{ ...newExpense, id: Date.now(), time: getCurrentTimeString() }, ...expenses]);
+        addLog("වියදමක් එකතු කළා", `${newExpense.category} - Rs.${newExpense.amount}`);
+        setNewExpense({ category: categories[0] || 'වෙනත්', amount: '', date: getTodayDate(), receipt: null });
+        showToast("වියදම සේව් විය");
+      };
+
+      const deleteExpense = (exp) => { 
+        if (canEdit && confirm("මෙය මකා දැමීමට අවශ්‍යද?")) {
+          updateLocalData('expenses', expenses.filter(e => e.id !== exp.id));
+          addLog("වියදමක් මැකුවා", `${exp.category} - Rs.${exp.amount}`);
+          showToast("මකා දමන ලදී", "info");
+        }
+      };
+
+      const handleAddShoppingItem = (e) => {
+        e.preventDefault();
+        if (!canEdit || !newShoppingItem.trim()) return;
+        updateLocalData('shoppingList', [{ id: Date.now(), item: newShoppingItem.trim(), checked: false, quantity: '', unit: 'kg', price: '' }, ...shoppingList]);
+        setNewShoppingItem('');
+      };
+
+      const handleShoppingItemChange = (id, field, value) => { if (!canEdit) return; updateLocalData('shoppingList', shoppingList.map(item => item.id === id ? { ...item, [field]: value } : item)); };
+
+      const deleteShoppingItem = (id) => { if (canEdit) { updateLocalData('shoppingList', shoppingList.filter(item => item.id !== id)); } };
+
+      const saveShoppingTrip = () => {
+        if (!canEdit) return;
+        const tripTotal = shoppingList.reduce((sum, item) => sum + (Number(item.price) || 0), 0);
+        if (tripTotal === 0) return;
+        const boughtItems = shoppingList.filter(item => Number(item.price) > 0);
+        const newExp = { id: Date.now(), category: 'බඩු ලැයිස්තුව', amount: tripTotal, items: boughtItems, date: getTodayDate(), time: getCurrentTimeString(), receipt: shoppingReceipt };
+        updateLocalData('expenses', [newExp, ...expenses]);
+        addLog("බිල සේව් කළා", `මුළු මුදල Rs.${tripTotal}`);
+        updateLocalData('shoppingList', shoppingList.map(item => ({ ...item, checked: false, quantity: '', price: '' })));
+        setShoppingReceipt(null); 
+        showToast("බිල වියදම් වලට එකතු කළා!");
+      };
+
+      const handleAddPendingBill = (e) => {
+        e.preventDefault();
+        if (!canEdit || !newPendingBill.name || !newPendingBill.amount) return;
+        updateLocalData('pendingBills', [{...newPendingBill, id: Date.now()}, ...pendingBills]);
+        addLog("ගෙවීමට ඇති බිලක් දැම්මා", `${newPendingBill.name} - Rs.${newPendingBill.amount}`);
+        setNewPendingBill({ name: '', amount: '', date: getTodayDate() });
+        showToast("බිල සටහන් කළා");
+      };
+
+      const payPendingBill = (bill) => {
+        if (!canEdit) return;
+        if(confirm(`"${bill.name}" ගෙවලා ඉවරයි කියලා සටහන් කරලා, වියදම් ලැයිස්තුවට දාන්නද?`)) {
+            updateLocalData('expenses', [{ category: bill.name, amount: bill.amount, date: getTodayDate(), id: Date.now(), time: getCurrentTimeString() }, ...expenses]);
+            updateLocalData('pendingBills', pendingBills.filter(b => b.id !== bill.id));
+            addLog("බිලක් ගෙව්වා", `${bill.name} - Rs.${bill.amount}`);
+            showToast("බිල ගෙවූ බව සටහන් විය");
+        }
+      };
+      
+      const deletePendingBill = (bill) => { if (canEdit && confirm("මෙය මකා දැමීමට අවශ්‍යද?")) { updateLocalData('pendingBills', pendingBills.filter(b => b.id !== bill.id)); addLog("ගෙවීමට තිබූ බිලක් මැකුවා", bill.name); } };
+
+      const handleLogTabUnlock = (e) => { 
+         e.preventDefault(); 
+         if(document.getElementById('logPinInput').value === appSettings.logPin) { 
+            setIsLogUnlocked(true); 
+         } else { 
+            alert("පාස්වර්ඩ් එක වැරදියි!"); 
+         } 
+      };
+
+      const LockMessage = () => {
+        if (!isAdmin) {
+            return (
+                <div className="mb-4 text-[13px] text-rose-600 font-bold text-center bg-rose-50 dark:bg-rose-900/30 dark:text-rose-400 p-2.5 rounded-lg border border-rose-100 dark:border-rose-800">
+                    <i className="fa-solid fa-lock"></i> දත්ත වෙනස් කිරීමට ලොක් එක අරින්න.
+                </div>
+            );
+        }
+        if (isAdmin && isPastMonth && !isPastUnlocked) {
+            return (
+                <div className="mb-4 text-[13px] text-orange-700 font-bold text-center bg-orange-50 p-3 rounded-lg border border-orange-200">
+                    <div className="text-center">මෙය අවසන් වූ මාසයකි.</div>
+                    <button onClick={handleUnlockPastMonth} className="bg-orange-600 text-white px-4 py-2 rounded-md text-xs mt-1">අන්ලොක් කරන්න</button>
+                </div>
+            );
+        }
+        return null;
+      };
+
+      if (isLoading) { 
+          return (
+              <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-gray-900">
+                  <div className="text-xl font-bold text-indigo-500 animate-pulse">
+                      <i className="fa-solid fa-spinner fa-spin mr-2"></i>දත්ත ලබා ගනිමින්...
+                  </div>
+              </div>
+          ); 
+      }
+
+      if (!currentUser) {
+         const finalName = selectedLoginName === 'NEW' ? customName.trim() : selectedLoginName;
+         const isNewUser = finalName && !userPins[finalName];
+         return (
+           <div className="min-h-screen flex items-center justify-center bg-slate-100 dark:bg-gray-900 p-4 relative overflow-hidden">
+             <div className="fixed top-4 right-4 flex flex-col gap-2 z-50 pointer-events-none">
+                 {toasts.map(t => (
+                     <div key={t.id} className={`px-4 py-2 rounded-full text-white text-sm font-bold shadow-lg animate-fade-in ${t.type === 'error' ? 'bg-red-600' : 'bg-emerald-600'}`}>
+                         {t.msg}
+                     </div>
+                 ))}
+             </div>
+             
+             <div className="absolute inset-0 bg-gradient-to-br from-blue-500/10 to-indigo-600/20 z-0"></div>
+             
+             <div className="bg-white dark:bg-gray-800 p-8 rounded-3xl shadow-2xl w-full max-w-sm flex flex-col items-center animate-fade-in z-10 border border-white/50 dark:border-gray-700">
+                <div className="bg-indigo-100 dark:bg-indigo-900/50 p-5 rounded-full mb-4 shadow-inner">
+                    <i className={`fa-solid ${loginStep === 1 ? 'fa-users' : 'fa-lock'} text-4xl text-indigo-600 dark:text-indigo-400`}></i>
+                </div>
+                <h1 className="text-3xl font-black mb-2 text-gray-800 dark:text-white tracking-tight">අපේ ගිණුම්</h1>
+                
+                {loginStep === 1 ? (
+                   <React.Fragment>
+                      <p className="text-gray-500 dark:text-gray-400 text-sm mb-8 font-bold text-center">ඔබගේ නම තෝරන්න</p>
+                      <div className="w-full mb-6 relative">
+                         <i className="fa-solid fa-user absolute left-4 top-4 text-gray-400"></i>
+                         <select 
+                            value={selectedLoginName} 
+                            onChange={(e) => {setSelectedLoginName(e.target.value); setCustomName('');}} 
+                            className="w-full p-3 pl-10 border-2 border-indigo-100 focus:border-indigo-500 dark:border-gray-600 rounded-xl outline-none bg-gray-50 dark:bg-gray-700 dark:text-white font-bold appearance-none transition-colors"
+                         >
+                            <option value="" disabled>-- නම තෝරන්න --</option>
+                            {userNames.map(n => <option key={n} value={n}>{n}</option>)}
+                            <option value="NEW" className="text-indigo-600 font-bold">+ අලුත් නමක් යොදන්න...</option>
+                         </select>
+                         <i className="fa-solid fa-chevron-down absolute right-4 top-4 text-gray-400 pointer-events-none"></i>
+                      </div>
+                      
+                      {selectedLoginName === 'NEW' && (
+                          <input 
+                            type="text" 
+                            placeholder="ඔබේ නම ටයිප් කරන්න..." 
+                            value={customName} 
+                            onChange={e => setCustomName(e.target.value)} 
+                            className="w-full p-3 border-2 border-indigo-300 rounded-xl mb-6 outline-none bg-indigo-50 dark:bg-gray-700 dark:border-indigo-500 dark:text-white font-bold text-center animate-fade-in"
+                          />
+                      )}
+                      
+                      <button 
+                        onClick={handleLoginNext} 
+                        disabled={selectedLoginName === 'NEW' ? !customName.trim() : !selectedLoginName} 
+                        className="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:bg-gray-300 disabled:text-gray-500 text-white py-3.5 rounded-xl font-black text-lg shadow-lg shadow-indigo-600/30 transition-all"
+                      >
+                          ඉදිරියට <i className="fa-solid fa-arrow-right ml-2"></i>
+                      </button>
+                   </React.Fragment>
+                ) : (
+                   <React.Fragment>
+                      <p className="text-gray-800 dark:text-white font-black text-lg mb-1">Hi, {finalName}</p>
+                      <p className="text-gray-500 dark:text-gray-400 text-xs mb-6 font-bold text-center">
+                          {isNewUser ? "ඔබගේ ගිණුමට නව PIN අංකයක් සාදන්න." : "ඔබගේ PIN අංකය ඇතුළත් කරන්න."}
+                      </p>
+                      
+                      <input 
+                        type="password" 
+                        pattern="[0-9]*" 
+                        inputMode="numeric" 
+                        placeholder={isNewUser ? "නව PIN එක..." : "PIN එක..."} 
+                        value={pinInput} 
+                        onChange={e => setPinInput(e.target.value)} 
+                        className="w-full p-4 border-2 border-indigo-300 rounded-xl mb-6 outline-none bg-indigo-50 dark:bg-gray-700 dark:border-indigo-500 dark:text-white font-black text-center tracking-[0.5em] text-xl shadow-inner animate-fade-in"
+                      />
+                      
+                      <div className="flex w-full gap-3">
+                         <button 
+                            onClick={() => {setLoginStep(1); setPinInput("");}} 
+                            className="flex-1 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-white py-3.5 rounded-xl font-bold transition-all"
+                         >
+                            ආපසු
+                         </button>
+                         <button 
+                            onClick={handleLoginConfirm} 
+                            className="flex-1 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white py-3.5 rounded-xl font-black shadow-lg shadow-indigo-600/30 transition-all"
+                         >
+                            ඇතුල් වන්න
+                         </button>
+                      </div>
+                   </React.Fragment>
+                )}
+             </div>
+           </div>
+         )
+      }
+
+      return (
+        <div className="min-h-screen pb-28 relative">
+          
+          <div className="fixed bottom-28 left-0 right-0 z-50 flex flex-col items-center gap-2 pointer-events-none">
+              {toasts.map(t => (
+                  <div key={t.id} className={`px-4 py-2 rounded-full text-white text-sm font-bold shadow-lg animate-fade-in ${t.type === 'error' ? 'bg-red-600' : 'bg-blue-600'}`}>
+                      {t.msg}
+                  </div>
+              ))}
+          </div>
+          
+          <header className={`bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10 shadow-sm p-3 sm:p-4 transition-colors`}>
+              <div className="max-w-5xl mx-auto flex justify-between items-center gap-2">
+                  <div className="flex items-center gap-2">
+                      <div className={`bg-${th.primary} text-white p-2 rounded-lg cursor-pointer`} onClick={changeThemeColor}>
+                          <i className="fa-solid fa-wallet text-lg"></i>
+                      </div>
+                      <div className="flex flex-col">
+                          <h1 className="text-xl sm:text-2xl font-bold dark:text-white leading-tight">අපේ ගිණුම්</h1>
+                          <span className="text-[10px] font-bold text-gray-500 dark:text-gray-400">Hi, {currentUser}!</span>
+                      </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                      <button onClick={fetchData} className="p-2 text-gray-500 dark:text-gray-300 hover:text-blue-500">
+                          <i className="fas fa-sync-alt"></i>
+                      </button>
+                      <button onClick={toggleDarkMode} className="p-2 text-gray-500 dark:text-gray-300">
+                          <i className={`fas ${isDarkMode ? 'fa-sun text-yellow-400' : 'fa-moon'}`}></i>
+                      </button>
+                      <select value={currentMonth} onChange={(e) => { setCurrentMonth(e.target.value); setIsLogUnlocked(false); }} className="p-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg max-w-[130px] font-bold text-[11px] sm:text-sm outline-none">
+                          {availableMonths.map(m => <option key={m} value={m}>{formatPeriodDisplay(m)}</option>)}
+                      </select>
+                      <button onClick={toggleAdmin} className={`px-3 py-2 rounded-lg border text-sm shadow-sm transition-colors ${isAdmin ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'bg-gray-100 border-gray-300 text-gray-600 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-300'}`}>
+                          <i className={`fa-solid ${isAdmin ? 'fa-unlock' : 'fa-lock'}`}></i>
+                      </button>
+                  </div>
+              </div>
+          </header>
+
+          <main className="max-w-5xl mx-auto px-4 py-6">
+            
+            {balance < 0 && activeTab === 'dashboard' && (
+                <div className="bg-red-600 text-white p-4 rounded-xl shadow-lg mb-4 flex items-center justify-center gap-3 animate-fade-in">
+                    <i className="fa-solid fa-triangle-exclamation text-2xl"></i>
+                    <h3 className="font-bold text-lg">අවධානයයි! වියදම ආදායමට වඩා වැඩියි.</h3>
+                </div>
+            )}
+
+            {activeTab === 'dashboard' && (
+              <div className="space-y-4 animate-fade-in">
+                
+                <div className={`bg-gradient-to-r from-${th.primary} to-indigo-700 rounded-2xl p-5 shadow-lg flex justify-between items-center text-white mb-4 relative overflow-hidden`}>
+                    <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white opacity-10 rounded-full blur-xl"></div>
+                    <div className="z-10">
+                        <p className="text-blue-100 text-sm font-medium mb-1 drop-shadow-sm">{formatDateDisplay(currentTime)}</p>
+                        <h2 className="text-3xl sm:text-4xl font-black tracking-wide drop-shadow-md">{formatTimeDisplay(currentTime)}</h2>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                    <div className="col-span-2 bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-6 shadow-lg text-white border-0">
+                        <p className="text-gray-300 text-sm font-bold mb-1">මේ මාසයේ ඉතිරිය</p>
+                        <h3 className={`text-4xl font-black ${balance < 0 ? 'text-red-400' : 'text-white'}`}>Rs. {balance.toLocaleString()}</h3>
+                    </div>
+                    <div className={`bg-${th.bg} dark:bg-gray-800 p-5 rounded-2xl shadow-sm border border-${th.primary}/20 dark:border-gray-700`}>
+                        <p className={`text-${th.primary} dark:text-blue-400 text-sm font-bold mb-1`}>
+                            <i className="fa-solid fa-arrow-trend-up mr-1"></i>ආදායම
+                        </p>
+                        <h3 className="text-xl font-black dark:text-white">Rs. {totalIncome.toLocaleString()}</h3>
+                    </div>
+                    <div className="bg-rose-50 dark:bg-gray-800 p-5 rounded-2xl shadow-sm border border-rose-200 dark:border-gray-700">
+                        <p className="text-rose-600 dark:text-rose-400 text-sm font-bold mb-1">
+                            <i className="fa-solid fa-arrow-trend-down mr-1"></i>වියදම
+                        </p>
+                        <h3 className="text-xl font-black dark:text-white">Rs. {totalExpense.toLocaleString()}</h3>
+                        {prevMonthData && (
+                          <p className={`text-[10px] mt-1 font-bold ${expenseDiff > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                            {expenseDiff > 0 ? `කලින් මාසයට වඩා රු.${Math.abs(expenseDiff)}ක් වැඩියි` : `කලින් මාසයට වඩා රු.${Math.abs(expenseDiff)}ක් අඩුයි`}
+                          </p>
+                        )}
+                    </div>
+                </div>
+
+                {pendingBills.length > 0 && (
+                    <div className="bg-orange-50 dark:bg-orange-900/20 p-5 rounded-2xl shadow-sm border border-orange-200 dark:border-orange-800 mt-6 animate-fade-in">
+                        <h3 className="text-orange-800 dark:text-orange-400 font-bold mb-3 flex items-center gap-2">
+                            <i className="fa-solid fa-file-invoice-dollar"></i> ඉදිරියට ගෙවීමට ඇති බිල්පත්
+                        </h3>
+                        <div className="space-y-3">
+                            {pendingBills.map(bill => (
+                                <div key={bill.id} className="flex justify-between items-center bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-orange-100 dark:border-gray-700">
+                                    <div>
+                                        <p className="font-bold text-sm dark:text-white">{bill.name}</p>
+                                        <p className="text-xs text-gray-500">{bill.date}</p>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <span className="font-black text-rose-600 dark:text-rose-400">Rs. {Number(bill.amount).toLocaleString()}</span>
+                                        {canEdit && (
+                                            <button onClick={() => payPendingBill(bill)} className="bg-emerald-500 text-white text-[10px] px-3 py-1.5 rounded-lg font-bold">ගෙව්වා</button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {categoryTotals.length > 0 && (
+                    <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 mt-6 animate-fade-in">
+                        <h3 className="text-gray-800 dark:text-white font-bold mb-4 flex items-center gap-2">
+                            <i className="fa-solid fa-chart-bar text-rose-500"></i> මේ මාසයේ වියදම් සාරාංශය
+                        </h3>
+                        <div className="space-y-4">
+                            {categoryTotals.map((cat, idx) => (
+                                <div key={idx}>
+                                    <div className="flex justify-between text-sm mb-1.5">
+                                        <span className="font-semibold text-gray-700 dark:text-gray-300">{cat.name}</span>
+                                        <span className="font-bold text-gray-900 dark:text-white">Rs. {cat.amount.toLocaleString()}</span>
+                                    </div>
+                                    <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-3">
+                                        <div className="bg-gradient-to-r from-rose-400 to-rose-600 h-3 rounded-full transition-all duration-500" style={{ width: `${(cat.amount / maxCategoryAmount) * 100}%` }}></div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'income' && (
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border dark:border-gray-700 p-5 animate-fade-in">
+                  <h2 className="text-xl font-bold mb-5 dark:text-white">ආදායම් සටහන</h2>
+                  <LockMessage />
+                  
+                  {canEdit && (
+                      <form onSubmit={handleAddIncome} className="flex gap-2 mb-5">
+                          <input type="text" placeholder="නමක්..." value={newIncomeName} onChange={(e) => setNewIncomeName(e.target.value)} className="p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-xl flex-1 outline-none"/>
+                          <button type="submit" className="bg-blue-600 text-white px-5 rounded-xl"><i className="fa-solid fa-plus text-lg"></i></button>
+                      </form>
+                  )}
+                  
+                  <div className="overflow-x-auto">
+                      <table className="w-full text-left">
+                          <thead>
+                              <tr className="bg-gray-50 dark:bg-gray-700 border-b dark:border-gray-600">
+                                  <th className="p-3 dark:text-gray-200">නම</th>
+                                  <th className="p-3 dark:text-gray-200">පඩි දිනය</th>
+                                  <th className="p-3 dark:text-gray-200">මුදල (Rs)</th>
+                                  <th className="p-3"></th>
+                              </tr>
+                          </thead>
+                          <tbody>
+                              {incomes.map((inc) => (
+                                  <tr key={inc.id} className="border-b dark:border-gray-700">
+                                      <td className="p-3">
+                                          <div className="font-bold dark:text-white">{inc.name}</div>
+                                          {inc.time && <div className="text-[10px] text-gray-400">{inc.time}</div>}
+                                      </td>
+                                      <td className="p-3">
+                                          <input type="text" disabled={!canEdit} value={inc.days} onChange={(e) => handleIncomeChange(inc.id, 'days', e.target.value)} className={`w-20 p-2 border border-gray-300 dark:border-gray-600 rounded-lg outline-none dark:bg-gray-700 dark:text-white ${!canEdit && 'opacity-70'}`}/>
+                                      </td>
+                                      <td className="p-3">
+                                          <input type="number" disabled={!canEdit} value={inc.amount} onChange={(e) => handleIncomeChange(inc.id, 'amount', e.target.value)} className={`w-28 p-2 border border-gray-300 dark:border-gray-600 rounded-lg outline-none dark:bg-gray-700 dark:text-white ${!canEdit && 'opacity-70'}`}/>
+                                      </td>
+                                      <td className="p-3 text-center">
+                                          {canEdit ? (
+                                              <button onClick={() => deleteIncome(inc)} className="text-gray-400 hover:text-red-500 p-2"><i className="fa-solid fa-trash"></i></button>
+                                          ) : (
+                                              <span className="text-gray-400"><i className="fa-solid fa-lock"></i></span>
+                                          )}
+                                      </td>
+                                  </tr>
+                              ))}
+                          </tbody>
+                      </table>
+                  </div>
+              </div>
+            )}
+
+            {activeTab === 'expenses' && (
+              <div className="space-y-6 animate-fade-in">
+                
+                <div className="bg-orange-50 dark:bg-gray-800 p-5 rounded-2xl shadow-sm border border-orange-200 dark:border-gray-700">
+                    <h2 className="text-lg font-bold mb-4 text-orange-800 dark:text-orange-400">
+                        <i className="fa-solid fa-clock-rotate-left mr-2"></i>ගෙවීමට ඇති බිලක් දාන්න
+                    </h2>
+                    {canEdit && (
+                        <form onSubmit={handleAddPendingBill} className="flex gap-2">
+                            <input type="text" placeholder="බිලේ නම..." value={newPendingBill.name} onChange={e=>setNewPendingBill({...newPendingBill, name: e.target.value})} className="p-3 flex-1 border border-orange-300 dark:border-gray-600 rounded-xl outline-none text-sm dark:bg-gray-700 dark:text-white"/>
+                            <input type="number" placeholder="Rs" value={newPendingBill.amount} onChange={e=>setNewPendingBill({...newPendingBill, amount: e.target.value})} className="p-3 w-1/3 border border-orange-300 dark:border-gray-600 rounded-xl outline-none text-sm font-bold bg-white dark:bg-gray-700 text-gray-900 dark:text-white"/>
+                            <button type="submit" className="bg-orange-600 text-white px-4 rounded-xl"><i className="fa-solid fa-plus"></i></button>
+                        </form>
+                    )}
+                    {pendingBills.length > 0 && (
+                        <div className="mt-4 space-y-2">
+                            {pendingBills.map(b => (
+                                <div key={b.id} className="flex justify-between items-center text-sm bg-white dark:bg-gray-700 p-2 rounded-lg border border-orange-100 dark:border-gray-600">
+                                    <span className="font-bold dark:text-gray-200 text-gray-800">{b.name} <span className="text-rose-500 ml-2">Rs. {b.amount}</span></span>
+                                    {canEdit && <button onClick={() => deletePendingBill(b)} className="text-red-400 px-2"><i className="fa-solid fa-times"></i></button>}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl shadow-sm border dark:border-gray-700">
+                    <h2 className="text-xl font-bold mb-4 dark:text-white">වියදම් එකතු කරන්න</h2>
+                    <LockMessage />
+                  
+                    {canEdit && (
+                        <form onSubmit={handleAddExpense} className="flex flex-col gap-4">
+                            <div className="flex gap-2 items-center bg-gray-50 dark:bg-gray-700 p-2 rounded-xl border border-gray-200 dark:border-gray-600">
+                                <input type="text" placeholder="අලුත් වර්ගයක්..." value={newCategory} onChange={e => setNewCategory(e.target.value)} className="p-2 border border-gray-300 dark:border-gray-500 rounded-lg flex-1 text-sm outline-none dark:bg-gray-600 dark:text-white"/>
+                                <button type="button" onClick={handleAddCategory} className="bg-gray-200 dark:bg-gray-500 dark:text-white px-4 py-2 rounded-lg font-bold text-sm">Add</button>
+                            </div>
+                            <div className="flex gap-2">
+                                <select value={newExpense.category} onChange={e => setNewExpense({...newExpense, category: e.target.value})} className="p-3 border border-gray-300 dark:border-gray-600 rounded-xl flex-1 outline-none dark:bg-gray-700 dark:text-white font-bold text-blue-700 dark:text-blue-400">
+                                    {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                                </select>
+                            </div>
+                            <div className="flex gap-2 items-center">
+                                <input type="number" required placeholder="Rs" value={newExpense.amount} onChange={e => setNewExpense({...newExpense, amount: e.target.value})} className="p-3 border border-gray-300 dark:border-gray-600 rounded-xl w-1/2 outline-none dark:bg-gray-700 dark:text-white font-bold"/>
+                                <input type="date" value={newExpense.date} onChange={e => setNewExpense({...newExpense, date: e.target.value})} className="p-3 border border-gray-300 dark:border-gray-600 rounded-xl outline-none dark:bg-gray-700 dark:text-white text-sm w-1/3"/>
+                                <label className="bg-gray-100 dark:bg-gray-600 text-gray-600 dark:text-gray-200 p-3 rounded-xl border border-gray-300 dark:border-gray-500 cursor-pointer text-center w-1/3 flex justify-center items-center gap-1 text-sm">
+                                    <i className="fa-solid fa-camera"></i> {newExpense.receipt ? 'OK' : 'බිල'}
+                                    <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => processImage(e.target.files[0], (dataUrl) => setNewExpense({...newExpense, receipt: dataUrl}))}/>
+                                </label>
+                            </div>
+                            <button type="submit" className="bg-rose-600 text-white p-3.5 rounded-xl font-bold shadow-sm">සටහන් කරන්න</button>
+                        </form>
+                    )}
+                </div>
+
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border dark:border-gray-700 overflow-hidden">
+                    <table className="w-full text-left">
+                        <thead>
+                            <tr className="bg-rose-50 dark:bg-rose-900/30 border-b dark:border-gray-700">
+                                <th className="p-4 dark:text-gray-200">වර්ගය</th>
+                                <th className="p-4 text-right dark:text-gray-200">මිල</th>
+                                <th className="p-4"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {expenses.map((exp) => (
+                                <React.Fragment key={exp.id}>
+                                    <tr className="border-b dark:border-gray-700">
+                                        <td className="p-4">
+                                            <div className="font-bold dark:text-white">
+                                                {exp.category}
+                                                {exp.items && (
+                                                    <button onClick={() => setViewingShoppingListId(viewingShoppingListId === exp.id ? null : exp.id)} className="ml-3 text-[10px] bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-200 px-2 py-1 rounded font-bold">
+                                                        {viewingShoppingListId === exp.id ? 'වහන්න' : 'බඩු බලන්න'}
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <div className="text-xs text-gray-500 mt-1">
+                                                {exp.date} {exp.time && <span className="ml-1">• {exp.time}</span>}
+                                            </div>
+                                            {exp.receipt && (
+                                                <img src={exp.receipt} alt="Receipt" className="mt-2 h-16 w-16 object-cover rounded border cursor-pointer" onClick={() => setViewingImage(exp.receipt)}/>
+                                            )}
+                                        </td>
+                                        <td className="p-4 text-right font-bold dark:text-gray-200">Rs. {Number(exp.amount).toLocaleString()}</td>
+                                        <td className="p-4 text-center">
+                                            {canEdit ? (
+                                                <button onClick={() => deleteExpense(exp)} className="text-red-400 p-2"><i className="fa-solid fa-trash"></i></button>
+                                            ) : (
+                                                <i className="fa-solid fa-lock text-gray-300"></i>
+                                            )}
+                                        </td>
+                                    </tr>
+                                    {viewingShoppingListId === exp.id && exp.items && (
+                                        <tr className="bg-indigo-50/50 dark:bg-indigo-900/20">
+                                            <td colSpan="3" className="p-4 text-sm dark:text-gray-300">
+                                                <ul className="space-y-1">
+                                                    {exp.items.map((it, idx) => (
+                                                        <li key={idx} className="flex justify-between">
+                                                            <span>• {it.item}</span>
+                                                            <span>Rs. {it.price}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </React.Fragment>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'shopping' && (
+              <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl shadow-sm border dark:border-gray-700 animate-fade-in">
+                  <h2 className="text-xl font-bold mb-5 dark:text-white">බඩු ලැයිස්තුව</h2>
+                  <LockMessage />
+                  
+                  {canEdit && (
+                      <form onSubmit={handleAddShoppingItem} className="flex gap-2 mb-5">
+                          <input type="text" placeholder="අලුත් බඩුවක්..." value={newShoppingItem} onChange={(e) => setNewShoppingItem(e.target.value)} className="flex-1 p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-xl outline-none"/>
+                          <button type="submit" className="bg-emerald-600 text-white px-5 rounded-xl"><i className="fa-solid fa-plus text-lg"></i></button>
+                      </form>
+                  )}
+                  
+                  <div className="grid grid-cols-1 gap-3">
+                      {shoppingList.map((item) => (
+                          <div key={item.id} className={`flex flex-col gap-3 p-4 rounded-xl border ${item.checked ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800' : 'bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600'}`}>
+                              <div className="flex items-center gap-3">
+                                  <input type="checkbox" disabled={!canEdit} checked={item.checked} onChange={() => handleShoppingItemChange(item.id, 'checked', !item.checked)} className="w-6 h-6 accent-emerald-600"/>
+                                  <span className={`flex-1 text-lg font-bold ${item.checked ? 'text-gray-400 line-through' : 'dark:text-white'}`}>{item.item}</span>
+                                  {canEdit && (
+                                      <button onClick={() => deleteShoppingItem(item.id)} className="text-red-400 p-2"><i className="fa-solid fa-trash"></i></button>
+                                  )}
+                              </div>
+                              <div className="flex gap-2 pl-9">
+                                  <input type="number" disabled={!canEdit} placeholder="ගණන" value={item.quantity} onChange={(e) => handleShoppingItemChange(item.id, 'quantity', e.target.value)} className="w-1/3 p-2 text-sm border border-gray-300 dark:border-gray-500 rounded-lg outline-none dark:bg-gray-600 dark:text-white"/>
+                                  <select disabled={!canEdit} value={item.unit || 'kg'} onChange={(e) => handleShoppingItemChange(item.id, 'unit', e.target.value)} className="w-1/3 p-2 text-sm border border-gray-300 dark:border-gray-500 rounded-lg outline-none dark:bg-gray-600 dark:text-white">
+                                      <option value="kg">kg</option>
+                                      <option value="g">g</option>
+                                      <option value="l">l</option>
+                                      <option value="පැකට්">පැකට්</option>
+                                      <option value="ගෙඩි">ගෙඩි</option>
+                                  </select>
+                                  <input type="number" disabled={!canEdit} placeholder="මිල" value={item.price} onChange={(e) => handleShoppingItemChange(item.id, 'price', e.target.value)} className="w-1/3 p-2 text-sm border border-gray-300 dark:border-gray-500 rounded-lg outline-none dark:bg-gray-600 dark:text-white"/>
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+                  
+                  <div className="mt-6 bg-emerald-600 rounded-xl p-5 text-white flex flex-col gap-4 shadow-md">
+                      <div className="flex justify-between items-center">
+                          <span className="text-xl font-bold">මුළු මුදල: <br/>Rs. {totalShoppingPrice.toLocaleString()}</span>
+                          {canEdit && (
+                              <label className="bg-emerald-700 hover:bg-emerald-800 transition-colors p-3 rounded-xl border border-emerald-500 cursor-pointer text-center flex justify-center items-center gap-2 text-sm">
+                                  <i className="fa-solid fa-camera"></i> {shoppingReceipt ? 'බිල දැම්මා' : 'බිල දාන්න'}
+                                  <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => processImage(e.target.files[0], setShoppingReceipt)}/>
+                              </label>
+                          )}
+                      </div>
+                      {canEdit && totalShoppingPrice > 0 && (
+                          <button onClick={saveShoppingTrip} className="bg-white text-emerald-800 py-3 rounded-lg font-black text-lg">බිල සේව් කරන්න</button>
+                      )}
+                  </div>
+              </div>
+            )}
+
+            {activeTab === 'logs' && (
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border dark:border-gray-700 p-5 animate-fade-in min-h-[60vh]">
+                  <h2 className="text-xl font-bold mb-5 dark:text-white flex items-center gap-2">
+                      <i className="fa-solid fa-clock-rotate-left text-gray-500"></i> රහසිගත ඉතිහාසය
+                  </h2>
+                 
+                 {!isLogUnlocked ? (
+                    <form onSubmit={handleLogTabUnlock} className="flex flex-col items-center justify-center pt-10 pb-20">
+                       <i className="fa-solid fa-user-secret text-5xl text-gray-300 mb-4"></i>
+                       <p className="text-gray-500 mb-4 text-center text-sm">රහස් පදයක් (Password) අවශ්‍යයි.</p>
+                       <div className="flex gap-2 w-full max-w-xs">
+                          <input type="password" id="logPinInput" placeholder="PIN..." className="p-3 border border-gray-300 dark:border-gray-600 rounded-xl flex-1 text-center font-bold tracking-[0.5em] dark:bg-gray-700 dark:text-white outline-none"/>
+                          <button type="submit" className="bg-gray-800 dark:bg-gray-600 text-white px-5 rounded-xl"><i className="fa-solid fa-arrow-right"></i></button>
+                       </div>
+                    </form>
+                 ) : (
+                    <div className="space-y-4">
+                       <button onClick={()=>setIsLogUnlocked(false)} className="text-xs bg-red-100 text-red-600 px-3 py-1 rounded-md mb-4 font-bold">Lock Again</button>
+                       
+                       <div className="mb-8 bg-rose-50 dark:bg-gray-900/50 p-4 rounded-xl border border-rose-200 dark:border-gray-700">
+                          <h3 className="font-bold text-gray-800 dark:text-white mb-4"><i className="fa-solid fa-shield-halved text-rose-500 mr-2"></i>ප්‍රධාන මුරපද (Master PINs)</h3>
+                          <div className="space-y-3">
+                             <div className="flex justify-between items-center bg-white dark:bg-gray-800 p-2.5 rounded-lg border border-gray-100 dark:border-gray-600">
+                                <span className="font-bold text-sm dark:text-gray-200">ඇඩ්මින් ලොක් එක</span>
+                                <input type="text" value={appSettings.adminPin} onChange={e => setAppSettings({...appSettings, adminPin: e.target.value})} className="w-20 p-1.5 border border-gray-300 dark:border-gray-500 rounded text-center font-bold dark:bg-gray-700 dark:text-white outline-none"/>
+                             </div>
+                             <div className="flex justify-between items-center bg-white dark:bg-gray-800 p-2.5 rounded-lg border border-gray-100 dark:border-gray-600">
+                                <span className="font-bold text-sm dark:text-gray-200">ඉතිහාසය ලොක් එක</span>
+                                <input type="text" value={appSettings.logPin} onChange={e => setAppSettings({...appSettings, logPin: e.target.value})} className="w-20 p-1.5 border border-gray-300 dark:border-gray-500 rounded text-center font-bold dark:bg-gray-700 dark:text-white outline-none"/>
+                             </div>
+                             <div className="flex justify-between items-center bg-white dark:bg-gray-800 p-2.5 rounded-lg border border-gray-100 dark:border-gray-600">
+                                <span className="font-bold text-sm dark:text-gray-200">පරණ මාස අන්ලොක්</span>
+                                <input type="text" value={appSettings.pastPin} onChange={e => setAppSettings({...appSettings, pastPin: e.target.value})} className="w-20 p-1.5 border border-gray-300 dark:border-gray-500 rounded text-center font-bold dark:bg-gray-700 dark:text-white outline-none"/>
+                             </div>
+                             <button onClick={saveSettings} className="w-full bg-rose-600 hover:bg-rose-700 text-white py-2 rounded-lg font-bold text-sm shadow-sm transition-colors mt-2">මුරපද සේව් කරන්න</button>
+                          </div>
+                       </div>
+
+                       <div className="mb-8 bg-gray-50 dark:bg-gray-900/50 p-4 rounded-xl border border-gray-200 dark:border-gray-700">
+                           <h3 className="font-bold text-gray-800 dark:text-white mb-4"><i className="fa-solid fa-users text-indigo-500 mr-2"></i>පරිශීලක PIN කළමනාකරණය</h3>
+                           {Object.keys(userPins).length === 0 ? (
+                               <p className="text-xs text-gray-500">තවම PIN සාදා නැත.</p>
+                           ) : (
+                               <div className="space-y-2">
+                                   {Object.entries(userPins).map(([name, pin]) => (
+                                       <div key={name} className="flex justify-between items-center bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-100 dark:border-gray-600">
+                                           <span className="font-bold text-sm dark:text-gray-200">{name}</span>
+                                           <div className="flex items-center gap-4">
+                                               <span className="text-sm font-mono tracking-widest text-indigo-600 dark:text-indigo-400 font-bold">{pin}</span>
+                                               <button onClick={() => handleResetUserPin(name)} className="bg-red-100 hover:bg-red-200 text-red-600 px-3 py-1.5 rounded-md text-xs font-bold transition-colors">Reset</button>
+                                           </div>
+                                       </div>
+                                   ))}
+                               </div>
+                           )}
+                       </div>
+                       
+                       <hr className="border-gray-200 dark:border-gray-700 mb-6"/>
+
+                       {logs.length === 0 ? (
+                           <p className="text-gray-500 text-center py-10">තවම කිසිවක් සටහන් වී නැත.</p>
+                       ) : (
+                           logs.map(log => (
+                               <div key={log.id} className="border-b border-gray-200 dark:border-gray-700 pb-3 flex justify-between items-start gap-4">
+                                   <div className="text-[10px] text-gray-400 whitespace-nowrap pt-1 flex flex-col">
+                                       <span>{log.date}</span>
+                                       <span className="font-bold">{log.time}</span>
+                                   </div>
+                                   <div className="flex-1">
+                                       <p className="text-sm font-bold text-gray-800 dark:text-gray-200">{log.action}</p>
+                                       <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5">{log.details}</p>
+                                   </div>
+                               </div>
+                           ))
+                       )}
+                    </div>
+                 )}
+              </div>
+            )}
+
+            {activeTab === 'statement' && (
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border dark:border-gray-700 p-5 animate-fade-in">
+                
+                <div className="no-print flex flex-col gap-3 mb-6 border-b dark:border-gray-700 pb-5">
+                   <h2 className="text-xl font-bold dark:text-white">සම්පූර්ණ ප්‍රකාශනය</h2>
+                   
+                   <div className="flex gap-2 w-full mt-2">
+                     <button onClick={shareToWhatsApp} className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white px-3 py-3 rounded-xl text-sm font-bold shadow-sm flex justify-center items-center gap-2">
+                        <i className="fa-brands fa-whatsapp text-lg"></i> WhatsApp යවන්න
+                     </button>
+                     <button onClick={nativeShare} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-3 rounded-xl text-sm font-bold shadow-sm flex justify-center items-center gap-2">
+                        <i className="fa-solid fa-share-nodes text-lg"></i> Share / Copy
+                     </button>
+                   </div>
+                </div>
+                
+                <div className="space-y-4">
+                  {globalStatement.length === 0 ? (
+                      <p className="text-gray-500 text-center py-4">තවම කිසිවක් නැත.</p>
+                  ) : (
+                      globalStatement.map(item => (
+                          <div key={`stmt-${item.id}-${item.type}`} className="border-b dark:border-gray-700 pb-3">
+                              <div className="flex justify-between items-center">
+                                  <div>
+                                      <div className="font-bold dark:text-white flex items-center gap-2">
+                                          {item.type === 'income' ? (
+                                              <div className="bg-emerald-100 dark:bg-emerald-900/50 p-1.5 rounded">
+                                                  <i className="fa-solid fa-arrow-down text-emerald-600 dark:text-emerald-400 text-xs"></i>
+                                              </div>
+                                          ) : (
+                                              <div className="bg-rose-100 dark:bg-rose-900/50 p-1.5 rounded">
+                                                  <i className="fa-solid fa-arrow-up text-rose-600 dark:text-rose-400 text-xs"></i>
+                                              </div>
+                                          )}
+                                          {item.title}
+                                      </div>
+                                      <div className="text-[11px] text-gray-500 mt-1 ml-8">
+                                          {item.displayDate} {item.time && <span className="ml-1">• {item.time}</span>}
+                                      </div>
+                                  </div>
+                                  <div className={`font-black text-lg ${item.type === 'income' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+                                      {item.type === 'income' ? '+' : '-'} Rs. {item.amount.toLocaleString()}
+                                  </div>
+                              </div>
+                              
+                              {(item.items || item.receipt) && (
+                                  <div className="mt-3 ml-8 flex flex-col items-start gap-2">
+                                      {item.items && item.items.length > 0 && (
+                                          <button onClick={() => setExpandedStmt(expandedStmt === item.id ? null : item.id)} className="text-[11px] bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 border dark:border-gray-600 px-3 py-1.5 rounded-md font-bold shadow-sm active:bg-gray-200">
+                                              බඩු බලන්න
+                                          </button>
+                                      )}
+                                      
+                                      {item.receipt && (
+                                          <img src={item.receipt} alt="Receipt" className="h-16 w-16 object-cover rounded border border-gray-300 dark:border-gray-600 cursor-pointer" onClick={() => setViewingImage(item.receipt)}/>
+                                      )}
+
+                                      {(expandedStmt === item.id || expandedStmt === 'all') && item.items && (
+                                          <div className="mt-1 w-full bg-gray-50 dark:bg-gray-900/50 p-3 rounded-xl border border-gray-100 dark:border-gray-700 text-sm animate-fade-in">
+                                              {item.items.map((it, idx) => (
+                                                  <div key={idx} className="flex justify-between border-b border-gray-200 dark:border-gray-700 last:border-0 py-1.5 dark:text-gray-300">
+                                                      <span>• {it.item} {it.quantity ? `(${it.quantity}${it.unit})` : ''}</span>
+                                                      <span className="font-semibold">Rs. {it.price}</span>
+                                                  </div>
+                                              ))}
+                                          </div>
+                                      )}
+                                  </div>
+                              )}
+                          </div>
+                      ))
+                  )}
+                </div>
+              </div>
+            )}
+          </main>
+
+          <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 h-[72px] flex justify-between items-center z-50 shadow-lg px-1 overflow-x-auto hide-scrollbar">
+            {[ 
+                { id: 'dashboard', icon: 'fa-house', text: 'පුවරුව' }, 
+                { id: 'income', icon: 'fa-hand-holding-dollar', text: 'ආදායම්' }, 
+                { id: 'expenses', icon: 'fa-receipt', text: 'වියදම්' }, 
+                { id: 'shopping', icon: 'fa-cart-shopping', text: 'බඩු' }, 
+                { id: 'statement', icon: 'fa-file-invoice-dollar', text: 'වාර්තා' }, 
+                { id: 'logs', icon: 'fa-shield-halved', text: 'ඉතිහාසය' }
+            ].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`flex flex-col items-center justify-center p-1 w-full min-w-[55px] ${activeTab === tab.id ? `text-${th.primary} dark:text-blue-400 font-extrabold` : 'text-gray-500 dark:text-gray-400'}`}>
+                    <i className={`fa-solid ${tab.icon} text-[18px] mb-1`}></i>
+                    <span className="text-[9px] sm:text-[10px] whitespace-nowrap">{tab.text}</span>
+                </button>
+            ))}
+          </nav>
+          
+          {viewingImage && (
+              <div className="fixed inset-0 z-[999] bg-black bg-opacity-90 flex flex-col items-center justify-center p-4 animate-fade-in" onClick={() => setViewingImage(null)}>
+                  <button className="absolute top-6 right-6 text-white text-4xl">&times;</button>
+                  <img src={viewingImage} alt="Receipt" className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl" />
+              </div>
+          )}
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root')); 
+    root.render(<App />);
+  </script>
+</body>
+</html>
