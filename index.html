@@ -356,7 +356,6 @@
          }
       }, [userNames, selectedLoginName]);
 
-      // නව ගණනය කිරීම: එක්ස්ට්‍රා එක මාසෙන් මාසෙට Carry Forward වීම සහ Base amount එක වෙන් කර ගැනීම
       const enrichedIncomes = useMemo(() => {
           if (!allData || !currentMonth) return [];
           const validMonths = Object.keys(allData).filter(m => m <= currentMonth).sort();
@@ -380,20 +379,17 @@
                   cumulativeSettled += mSettled;
               });
               
-              // එක්ස්ට්‍රා = පරිශීලකයා තම අතින් ගෙනා බඩු (සහ වෙනත් වියදම්) - පොදු ගිණුමෙන් ඔහුට පියවූ මුදල
               const extra = cumulativeGoods - cumulativeSettled;
               return { ...inc, cash, extra };
           });
       }, [incomes, allData, currentMonth]);
 
-      // පොදු ගිණුමට ලැබුණු මුළු මුදල (Base Cash පමණක්)
       const totalIncome = enrichedIncomes.reduce((s, u) => s + u.cash, 0);
 
       const totalShoppingPrice = shoppingList.reduce((s, c) => s + (Number(c.price) || 0), 0);
       const manualExpenses = expenses.reduce((s, c) => s + (Number(c.amount) || 0), 0);
-      const totalExpense = manualExpenses + totalShoppingPrice; // මේ මාසේ මුළු නිවසේ වියදම පෙන්වීමට
+      const totalExpense = manualExpenses + totalShoppingPrice; 
 
-      // මේ මාසේ පොදු ගිණුමෙන් ගිය වියදම් පමණක්
       const thisMonthPoolExpenses = expenses
           .filter(e => e.payer === 'පොදු ගිණුමෙන්' || !e.payer)
           .reduce((s, e) => s + (Number(e.amount) || 0), 0);
@@ -413,7 +409,6 @@
         return bal;
       }, [allData, currentMonth]);
 
-      // පොදු ගිණුමේ ශේෂය = කලින් ඉතිරිය + මේ මාසේ Cash In - මේ මාසේ Cash Out
       const balance = broughtForward + totalIncome - thisMonthPoolExpenses;
 
       const categoryTotals = useMemo(() => {
@@ -439,7 +434,6 @@
           })).sort((a, b) => b.amount - a.amount);
       }, [categoryTotals]);
 
-      // පියවීම් ලැයිස්තුව: සියලුම මාස වල දත්ත වලින් Extra > 0 වන අය
       const settlements = useMemo(() => {
           if (!allData || !currentMonth) return [];
           const allUsers = new Set();
@@ -465,6 +459,23 @@
           });
           return toSettle;
       }, [allData, currentMonth]);
+
+      // නව ප්‍රස්ථාර සඳහා දත්ත
+      const settlementsChartData = useMemo(() => {
+          return settlements.map((s, idx) => ({
+              name: s.name,
+              amount: Number(s.toSettle) || 0,
+              color: chartColors[(idx + 7) % chartColors.length]
+          })).sort((a, b) => b.amount - a.amount);
+      }, [settlements]);
+
+      const pendingBillsChartData = useMemo(() => {
+          return pendingBills.map((b, idx) => ({
+              name: b.name,
+              amount: Number(b.amount) || 0,
+              color: chartColors[(idx + 8) % chartColors.length]
+          })).sort((a, b) => b.amount - a.amount);
+      }, [pendingBills]);
 
       const globalStatement = useMemo(() => {
         const stmt = [];
@@ -938,7 +949,7 @@
                         <h3 className="text-indigo-800 dark:text-indigo-400 font-bold mb-4 flex items-center gap-2">
                             <i className="fa-solid fa-handshake"></i> ඉතිරි මුදල් පියවීම්
                         </h3>
-                        <div className="space-y-3">
+                        <div className="space-y-3 mb-4">
                             {settlements.map(s => (
                                 <div key={s.name} className="flex justify-between items-center bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-indigo-100 dark:border-gray-700">
                                     <div>
@@ -954,6 +965,9 @@
                                 </div>
                             ))}
                         </div>
+                        <div className="border-t border-indigo-200 dark:border-indigo-800/50 pt-2">
+                            <DonutChart data={settlementsChartData} title="මුළු පියවීම්" />
+                        </div>
                     </div>
                 )}
 
@@ -962,7 +976,7 @@
                         <h3 className="text-orange-800 dark:text-orange-400 font-bold mb-3 flex items-center gap-2">
                             <i className="fa-solid fa-file-invoice-dollar"></i> ඉදිරියට ගෙවීමට ඇති බිල්පත්
                         </h3>
-                        <div className="space-y-3">
+                        <div className="space-y-3 mb-4">
                             {pendingBills.map(bill => (
                                 <div key={bill.id} className="flex justify-between items-center bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-orange-100 dark:border-gray-700">
                                     <div>
@@ -977,6 +991,9 @@
                                     </div>
                                 </div>
                             ))}
+                        </div>
+                        <div className="border-t border-orange-200 dark:border-orange-800/50 pt-2">
+                            <DonutChart data={pendingBillsChartData} title="මුළු බිල්පත්" />
                         </div>
                     </div>
                 )}
