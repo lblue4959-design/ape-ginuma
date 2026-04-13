@@ -114,6 +114,57 @@
       logPin: "1896"
     };
 
+    const DonutChart = ({ data, title }) => {
+        const total = data.reduce((sum, item) => sum + item.amount, 0);
+        if(total === 0) return <p className="text-gray-400 text-xs text-center py-4">දත්ත නොමැත</p>;
+        
+        let currentOffset = 0;
+        
+        return (
+            <div className="flex flex-col sm:flex-row items-center gap-4 mt-4">
+                <div className="relative w-40 h-40 flex-shrink-0">
+                    <svg viewBox="0 0 100 100" className="w-full h-full transform -rotate-90">
+                        {data.map((item, idx) => {
+                            const circumference = 2 * Math.PI * 25; 
+                            const strokeDasharray = `${(item.amount / total) * circumference} ${circumference}`;
+                            const strokeDashoffset = -currentOffset;
+                            currentOffset += (item.amount / total) * circumference;
+                            
+                            return (
+                                <circle 
+                                    key={idx} 
+                                    cx="50" cy="50" r="25" 
+                                    fill="transparent" 
+                                    stroke={item.color} 
+                                    strokeWidth="50" 
+                                    strokeDasharray={strokeDasharray} 
+                                    strokeDashoffset={strokeDashoffset} 
+                                    className="transition-all duration-1000 ease-out"
+                                />
+                            );
+                        })}
+                        <circle cx="50" cy="50" r="28" className="fill-white dark:fill-gray-800" />
+                    </svg>
+                    <div className="absolute inset-0 flex items-center justify-center flex-col text-center">
+                        <span className="text-[10px] text-gray-500 font-bold dark:text-gray-400 leading-tight">{title}</span>
+                        <span className="text-sm font-black text-gray-800 dark:text-white mt-0.5 px-2">Rs.<br/>{total.toLocaleString()}</span>
+                    </div>
+                </div>
+                <div className="flex-1 w-full space-y-1.5 max-h-48 overflow-y-auto hide-scrollbar">
+                    {data.map((item, idx) => (
+                        <div key={idx} className="flex justify-between items-center text-xs bg-gray-50 dark:bg-gray-900/50 p-2 rounded-lg border border-gray-100 dark:border-gray-700">
+                            <div className="flex items-center gap-2 pr-2 overflow-hidden">
+                                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{backgroundColor: item.color}}></div>
+                                <span className="dark:text-gray-300 font-bold truncate">{item.name}</span>
+                            </div>
+                            <span className="font-black dark:text-white whitespace-nowrap">Rs. {item.amount.toLocaleString()}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    };
+
     function App() {
       const [currentUser, setCurrentUser] = useState(null);
       const [selectedLoginName, setSelectedLoginName] = useState("");
@@ -164,6 +215,8 @@
         red: { primary: 'rose-600', bg: 'rose-50', text: 'rose-900', hover: 'rose-700' }
       };
       const th = themes[themeColor] || themes['blue'];
+
+      const chartColors = ['#3b82f6', '#10b981', '#f43f5e', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#64748b', '#84cc16'];
 
       useEffect(() => {
         const timerId = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -316,7 +369,28 @@
          }
       }, [userNames, selectedLoginName]);
 
-      const totalIncome = incomes.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+      const userSummaries = useMemo(() => {
+          return incomes.map(inc => {
+              const name = inc.name || '';
+              const cash = Number(inc.amount) || 0;
+              const goods = expenses
+                  .filter(e => e.payer === name && (!e.category || !e.category.includes('පියවීම')))
+                  .reduce((sum, e) => sum + Number(e.amount), 0);
+              
+              const settled = expenses
+                  .filter(e => e.category === `${name}ගේ ඉතිරි පියවීම`)
+                  .reduce((sum, e) => sum + Number(e.amount), 0);
+                  
+              const totalGiven = cash + goods;
+              const expected = 15000;
+              // එක්ස්ට්‍රා = සම්පූර්ණ මුදල - 15000 - පියවූ මුදල
+              const extra = totalGiven - expected - settled;
+              
+              return { ...inc, cash, goods, totalGiven, settled, extra };
+          });
+      }, [incomes, expenses]);
+
+      const totalIncome = userSummaries.reduce((s, u) => s + u.totalGiven, 0);
       const totalShoppingPrice = shoppingList.reduce((s, c) => s + (Number(c.price) || 0), 0);
       const manualExpenses = expenses.reduce((s, c) => s + (Number(c.amount) || 0), 0);
       const totalExpense = manualExpenses + totalShoppingPrice;
@@ -324,15 +398,21 @@
       const broughtForward = useMemo(() => {
         if (!allData || !currentMonth) return 0;
         const sortedMonths = Object.keys(allData).sort();
-        let balance = 0;
+        let bal = 0;
         for (const mId of sortedMonths) {
           if (mId === currentMonth) break; 
           const d = allData[mId];
-          const inc = (d.incomes || []).reduce((s, c) => s + (Number(c.amount)||0), 0);
-          const exp = (d.expenses || []).reduce((s, c) => s + (Number(c.amount)||0), 0) + (d.shoppingList || []).reduce((s, c) => s + (Number(c.price)||0), 0);
-          balance += (inc - exp);
+          const mInc = (d.incomes || []).reduce((s, c) => s + (Number(c.amount)||0), 0);
+          let extraGoods = 0;
+          (d.expenses || []).forEach(e => {
+             if (e.payer && e.payer !== 'පොදු ගිණුමෙන්' && !e.category.includes('පියවීම')) {
+                 extraGoods += Number(e.amount);
+             }
+          });
+          const mExp = (d.expenses || []).reduce((s, c) => s + (Number(c.amount)||0), 0) + (d.shoppingList || []).reduce((s, c) => s + (Number(c.price)||0), 0);
+          bal += ((mInc + extraGoods) - mExp);
         }
-        return balance;
+        return bal;
       }, [allData, currentMonth]);
 
       const balance = broughtForward + totalIncome - totalExpense;
@@ -357,25 +437,26 @@
         if (totalShoppingPrice > 0) totals['බඩු ලැයිස්තුව'] = (totals['බඩු ලැයිස්තුව'] || 0) + totalShoppingPrice;
         return Object.entries(totals).map(([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount);
       }, [expenses, totalShoppingPrice]);
-      
-      const maxCategoryAmount = Math.max(...categoryTotals.map(c => c.amount), 1);
 
-      // --- අලුත්: ආදායම් මුදල් කෙලින්ම අඩු කරන නිසා ගණනය කිරීම සරල කර ඇත ---
+      const incomeChartData = useMemo(() => {
+          return userSummaries.filter(u => u.totalGiven > 0).map((u, idx) => ({
+              name: u.name,
+              amount: u.totalGiven,
+              color: chartColors[idx % chartColors.length]
+          })).sort((a, b) => b.amount - a.amount);
+      }, [userSummaries]);
+
+      const expenseChartData = useMemo(() => {
+          return categoryTotals.map((cat, idx) => ({
+              name: cat.name,
+              amount: cat.amount,
+              color: chartColors[(idx + 4) % chartColors.length] 
+          })).sort((a, b) => b.amount - a.amount);
+      }, [categoryTotals]);
+
       const settlements = useMemo(() => {
-          const results = [];
-          incomes.forEach(inc => {
-              if (!inc.name) return;
-              const incomeAmt = Number(inc.amount) || 0;
-              // කෙලින්ම ආදායමෙන් අඩු කරන නිසා, ආදායමේ ඉතුරු වෙලා තියෙන ගාණ 15,000ට වඩා වැඩිනම් ඒක තමයි පියවන්න තියෙන්නේ.
-              if (incomeAmt > 15000) {
-                  const toSettle = incomeAmt - 15000;
-                  if (toSettle > 0) {
-                      results.push({ name: inc.name, toSettle });
-                  }
-              }
-          });
-          return results;
-      }, [incomes]);
+          return userSummaries.filter(u => u.extra > 0).map(u => ({ name: u.name, toSettle: u.extra }));
+      }, [userSummaries]);
 
       const globalStatement = useMemo(() => {
         const stmt = [];
@@ -565,12 +646,6 @@
 
         updateLocalData('expenses', [{ ...newExpense, payer: expensePayer, id: Date.now(), time: getCurrentTimeString() }, ...expenses]);
         
-        if (expensePayer !== 'පොදු ගිණුමෙන්') {
-            const updatedIncomes = incomes.map(inc => inc.name === expensePayer ? { ...inc, amount: (Number(inc.amount) || 0) + expAmt } : inc);
-            updateLocalData('incomes', updatedIncomes);
-            addLog("ආදායම් යාවත්කාලීන විය", `${expensePayer} ගේ ගිණුමට Rs.${expAmt} එකතු විය (වියදමක් දැරූ නිසා)`);
-        }
-
         addLog("වියදමක් එකතු කළා", `${newExpense.category} - Rs.${expAmt} (${expensePayer})`);
         setNewExpense({ category: categories[0] || 'වෙනත්', amount: '', date: getTodayDate(), receipt: null });
         setExpensePayer('පොදු ගිණුමෙන්');
@@ -611,12 +686,6 @@
         const newExp = { id: Date.now(), category: 'බඩු ලැයිස්තුව', amount: tripTotal, items: boughtItems, date: shoppingDate, payer: shoppingPayer, time: getCurrentTimeString(), receipt: shoppingReceipt };
         updateLocalData('expenses', [newExp, ...expenses]);
         
-        if (shoppingPayer !== 'පොදු ගිණුමෙන්') {
-            const updatedIncomes = incomes.map(inc => inc.name === shoppingPayer ? { ...inc, amount: (Number(inc.amount) || 0) + tripTotal } : inc);
-            updateLocalData('incomes', updatedIncomes);
-            addLog("ආදායම් යාවත්කාලීන විය", `${shoppingPayer} ගේ ගිණුමට Rs.${tripTotal} එකතු විය (බඩු ගෙනා නිසා)`);
-        }
-
         addLog("බිල සේව් කළා", `මුළු මුදල Rs.${tripTotal} (${shoppingPayer})`);
         updateLocalData('shoppingList', shoppingList.map(item => ({ ...item, checked: false, quantity: '', price: '' })));
         setShoppingReceipt(null); 
@@ -644,7 +713,6 @@
         }
       };
 
-      // --- අලුත්: ආදායමෙන් මුදල් අඩු කරන පියවීමේ කොටස ---
       const handleSettleUser = (name, amountToSettle) => {
         if (!canEdit) return;
         const amountStr = prompt(`${name}ගේ ඉතිරි මුදල රු.${amountToSettle.toLocaleString()} යි. \nපියවන ගාණ (Amount) පහළින් ඇතුළත් කරන්න:`, amountToSettle);
@@ -656,17 +724,10 @@
             return alert("කරුණාකර නිවැරදි මුදලක් ඇතුළත් කරන්න!");
         }
 
-        // ආදායම් සටහනෙන් කෙලින්ම ගාණ අඩු කිරීම
-        const updatedIncomes = incomes.map(inc => {
-            if (inc.name === name) {
-                return { ...inc, amount: (Number(inc.amount) || 0) - amount };
-            }
-            return inc;
-        });
-        updateLocalData('incomes', updatedIncomes);
+        const newExp = { id: Date.now(), category: `${name}ගේ ඉතිරි පියවීම`, amount: amount, payer: 'පොදු ගිණුමෙන්', date: getTodayDate(), time: getCurrentTimeString() };
+        updateLocalData('expenses', [newExp, ...expenses]);
         
-        // වියදමක් විදිහට එකතු කරන්නේ නැහැ, කෙලින්ම ආදායමෙන් අඩු වෙන නිසා බැලන්ස් එක auto හැදෙනවා.
-        addLog("මුදල් පියෙව්වා", `${name}ට Rs.${amount.toLocaleString()} ක් පියවීම සටහන් විය (ආදායමෙන් අඩු විය)`);
+        addLog("මුදල් පියෙව්වා", `${name}ට Rs.${amount.toLocaleString()} ක් පියවීම සටහන් විය`);
         showToast(`${name}ට රු.${amount.toLocaleString()} ක් පියවීම සටහන් විය`);
       };
       
@@ -868,23 +929,6 @@
                         <p className="text-gray-300 text-sm font-bold mb-1">මේ මාසයේ ඉතිරිය</p>
                         <h3 className={`text-4xl font-black ${balance < 0 ? 'text-red-400' : 'text-white'}`}>Rs. {balance.toLocaleString()}</h3>
                     </div>
-                    <div className={`bg-${th.bg} dark:bg-gray-800 p-5 rounded-2xl shadow-sm border border-${th.primary}/20 dark:border-gray-700`}>
-                        <p className={`text-${th.primary} dark:text-blue-400 text-sm font-bold mb-1`}>
-                            <i className="fa-solid fa-arrow-trend-up mr-1"></i>ආදායම
-                        </p>
-                        <h3 className="text-xl font-black dark:text-white">Rs. {totalIncome.toLocaleString()}</h3>
-                    </div>
-                    <div className="bg-rose-50 dark:bg-gray-800 p-5 rounded-2xl shadow-sm border border-rose-200 dark:border-gray-700">
-                        <p className="text-rose-600 dark:text-rose-400 text-sm font-bold mb-1">
-                            <i className="fa-solid fa-arrow-trend-down mr-1"></i>වියදම
-                        </p>
-                        <h3 className="text-xl font-black dark:text-white">Rs. {totalExpense.toLocaleString()}</h3>
-                        {prevMonthData && (
-                          <p className={`text-[10px] mt-1 font-bold ${expenseDiff > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                            {expenseDiff > 0 ? `කලින් මාසයට වඩා රු.${Math.abs(expenseDiff)}ක් වැඩියි` : `කලින් මාසයට වඩා රු.${Math.abs(expenseDiff)}ක් අඩුයි`}
-                          </p>
-                        )}
-                    </div>
                 </div>
 
                 {settlements.length > 0 && (
@@ -935,31 +979,25 @@
                     </div>
                 )}
 
-                {categoryTotals.length > 0 && (
-                    <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 mt-6 animate-fade-in">
-                        <h3 className="text-gray-800 dark:text-white font-bold mb-4 flex items-center gap-2">
-                            <i className="fa-solid fa-chart-bar text-rose-500"></i> මේ මාසයේ වියදම් සාරාංශය
-                        </h3>
-                        <div className="space-y-4">
-                            {categoryTotals.map((cat, idx) => (
-                                <div key={idx}>
-                                    <div className="flex justify-between text-sm mb-1.5">
-                                        <span className="font-semibold text-gray-700 dark:text-gray-300">{cat.name}</span>
-                                        <span className="font-bold text-gray-900 dark:text-white">Rs. {cat.amount.toLocaleString()}</span>
-                                    </div>
-                                    <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-3">
-                                        <div className="bg-gradient-to-r from-rose-400 to-rose-600 h-3 rounded-full transition-all duration-500" style={{ width: `${(cat.amount / maxCategoryAmount) * 100}%` }}></div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
+                <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 mt-6 animate-fade-in">
+                    <h3 className="text-gray-800 dark:text-white font-bold mb-2 flex items-center gap-2">
+                        <i className="fa-solid fa-chart-pie text-emerald-500"></i> මේ මාසයේ ආදායම් සාරාංශය
+                    </h3>
+                    <DonutChart data={incomeChartData} title="මුළු ආදායම" />
+                </div>
+
+                <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 mt-6 animate-fade-in">
+                    <h3 className="text-gray-800 dark:text-white font-bold mb-2 flex items-center gap-2">
+                        <i className="fa-solid fa-chart-pie text-rose-500"></i> මේ මාසයේ වියදම් සාරාංශය
+                    </h3>
+                    <DonutChart data={expenseChartData} title="මුළු වියදම" />
+                </div>
+
               </div>
             )}
 
             {activeTab === 'income' && (
-              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border dark:border-gray-700 p-5 animate-fade-in">
+              <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border dark:border-gray-700 p-5 animate-fade-in overflow-hidden">
                   <h2 className="text-xl font-bold mb-5 dark:text-white">ආදායම් සටහන</h2>
                   <LockMessage />
                   
@@ -970,30 +1008,37 @@
                       </form>
                   )}
                   
-                  <div className="overflow-x-auto">
-                      <table className="w-full text-left">
+                  <div className="overflow-x-auto pb-4">
+                      {/* අලුත්: බඩු සහ ඉදිරිය ඉවත් කර "එක්ස්ට්‍රා" තීරුව පමණක් ඇත */}
+                      <table className="w-full text-left min-w-[400px]">
                           <thead>
-                              <tr className="bg-gray-50 dark:bg-gray-700 border-b dark:border-gray-600">
-                                  <th className="p-3 dark:text-gray-200">නම</th>
-                                  <th className="p-3 dark:text-gray-200">පඩි දිනය</th>
+                              <tr className="bg-gray-50 dark:bg-gray-700 border-b dark:border-gray-600 text-sm">
+                                  <th className="p-3 dark:text-gray-200">නම / දිනය</th>
                                   <th className="p-3 dark:text-gray-200">මුදල (Rs)</th>
+                                  <th className="p-3 dark:text-gray-200 whitespace-nowrap">එක්ස්ට්‍රා (Rs)</th>
                                   <th className="p-3"></th>
                               </tr>
                           </thead>
                           <tbody>
-                              {incomes.map((inc) => (
+                              {userSummaries.map((inc) => (
                                   <tr key={inc.id} className="border-b dark:border-gray-700">
                                       <td className="p-3">
-                                          <div className="font-bold dark:text-white">{inc.name}</div>
-                                          {inc.time && <div className="text-[10px] text-gray-400">{inc.time}</div>}
+                                          <div className="font-bold dark:text-white text-base">{inc.name}</div>
+                                          <input type="text" disabled={!canEdit} placeholder="දිනය" value={inc.days} onChange={(e) => handleIncomeChange(inc.id, 'days', e.target.value)} className={`w-16 mt-1 p-1 text-[10px] border border-gray-300 dark:border-gray-600 rounded bg-transparent outline-none dark:text-white ${!canEdit && 'opacity-70'}`}/>
                                       </td>
-                                      <td className="p-3">
-                                          <input type="text" disabled={!canEdit} value={inc.days} onChange={(e) => handleIncomeChange(inc.id, 'days', e.target.value)} className={`w-20 p-2 border border-gray-300 dark:border-gray-600 rounded-lg outline-none dark:bg-gray-700 dark:text-white ${!canEdit && 'opacity-70'}`}/>
+                                      <td className="p-3 align-top pt-4">
+                                          <input type="number" disabled={!canEdit} value={inc.amount} onChange={(e) => handleIncomeChange(inc.id, 'amount', e.target.value)} className={`w-24 p-1.5 font-bold border border-gray-300 dark:border-gray-600 rounded outline-none dark:bg-gray-700 dark:text-white ${!canEdit && 'opacity-70'}`}/>
                                       </td>
-                                      <td className="p-3">
-                                          <input type="number" disabled={!canEdit} value={inc.amount} onChange={(e) => handleIncomeChange(inc.id, 'amount', e.target.value)} className={`w-28 p-2 border border-gray-300 dark:border-gray-600 rounded-lg outline-none dark:bg-gray-700 dark:text-white ${!canEdit && 'opacity-70'}`}/>
+                                      <td className="p-3 align-top pt-4">
+                                          {inc.extra === 0 ? (
+                                              <span className="text-gray-400 font-bold">0</span>
+                                          ) : inc.extra > 0 ? (
+                                              <span className="text-indigo-600 dark:text-indigo-400 font-black whitespace-nowrap">+{inc.extra.toLocaleString()}</span>
+                                          ) : (
+                                              <span className="text-rose-500 font-bold whitespace-nowrap">{inc.extra.toLocaleString()}</span>
+                                          )}
                                       </td>
-                                      <td className="p-3 text-center">
+                                      <td className="p-3 text-center align-top pt-3">
                                           {canEdit ? (
                                               <button onClick={() => deleteIncome(inc)} className="text-gray-400 hover:text-red-500 p-2"><i className="fa-solid fa-trash"></i></button>
                                           ) : (
@@ -1004,6 +1049,24 @@
                               ))}
                           </tbody>
                       </table>
+                  </div>
+
+                  <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700">
+                      <div className="flex justify-between items-center text-sm font-bold text-gray-700 dark:text-gray-300">
+                          <span>මුළු ආදායම:</span>
+                          <span>Rs. {totalIncome.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm font-bold text-gray-700 dark:text-gray-300 mt-1">
+                          <span>මුළු වියදම:</span>
+                          <span>Rs. {totalExpense.toLocaleString()}</span>
+                      </div>
+                      <div className="border-t border-gray-300 dark:border-gray-600 my-2"></div>
+                      <div className="flex justify-between items-center font-black text-lg">
+                          <span className="dark:text-white">මේ මාසේ ශේෂය:</span>
+                          <span className={(totalIncome - totalExpense) < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}>
+                              {totalIncome - totalExpense < 0 ? '' : '+'} Rs. {(totalIncome - totalExpense).toLocaleString()}
+                          </span>
+                      </div>
                   </div>
               </div>
             )}
@@ -1071,60 +1134,61 @@
                     )}
                 </div>
 
-                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border dark:border-gray-700 overflow-hidden">
-                    <table className="w-full text-left">
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border dark:border-gray-700 overflow-hidden w-full">
+                    <table className="w-full text-left table-fixed">
                         <thead>
                             <tr className="bg-rose-50 dark:bg-rose-900/30 border-b dark:border-gray-700">
-                                <th className="p-4 dark:text-gray-200">වර්ගය</th>
-                                <th className="p-4 text-right dark:text-gray-200">මිල</th>
-                                <th className="p-4"></th>
+                                <th className="p-3 w-1/2 dark:text-gray-200">වර්ගය</th>
+                                <th className="p-3 w-1/3 text-right dark:text-gray-200">මිල</th>
+                                <th className="p-3 w-12"></th>
                             </tr>
                         </thead>
                         <tbody>
                             {expenses.map((exp) => (
                                 <React.Fragment key={exp.id}>
                                     <tr className="border-b dark:border-gray-700">
-                                        <td className="p-4">
-                                            <div className="font-bold dark:text-white flex items-center gap-2">
-                                                {exp.category}
+                                        <td className="p-3 align-top overflow-hidden">
+                                            <div className="font-bold dark:text-white flex flex-wrap items-center gap-1.5">
+                                                <span className="truncate max-w-full">{exp.category}</span>
                                                 {exp.payer && exp.payer !== 'පොදු ගිණුමෙන්' && (
-                                                    <span className="text-[9px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold border border-indigo-200">{exp.payer}</span>
+                                                    <span className="text-[9px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded font-bold border border-indigo-200 whitespace-nowrap">{exp.payer}</span>
                                                 )}
                                                 {exp.items && (
-                                                    <button onClick={() => setViewingShoppingListId(viewingShoppingListId === exp.id ? null : exp.id)} className="ml-2 text-[10px] bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-200 px-2 py-1 rounded font-bold">
+                                                    <button onClick={() => setViewingShoppingListId(viewingShoppingListId === exp.id ? null : exp.id)} className="text-[10px] bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-200 px-2 py-1 rounded font-bold whitespace-nowrap ml-1 mt-1">
                                                         {viewingShoppingListId === exp.id ? 'වහන්න' : 'බඩු'}
                                                     </button>
                                                 )}
                                             </div>
-                                            <div className="text-xs text-gray-500 mt-2 flex items-center gap-1">
+                                            <div className="text-xs text-gray-500 mt-2 flex flex-wrap items-center gap-1">
                                                 {canEdit ? (
-                                                    <input type="date" value={exp.date} onChange={(e) => handleExpenseDateChange(exp.id, e.target.value)} className="bg-transparent border border-gray-200 dark:border-gray-600 rounded p-1 outline-none text-[11px] text-gray-600 dark:text-gray-300 w-28 cursor-pointer"/>
+                                                    <input type="date" value={exp.date} onChange={(e) => handleExpenseDateChange(exp.id, e.target.value)} className="bg-transparent border border-gray-200 dark:border-gray-600 rounded p-1 outline-none text-[10px] text-gray-600 dark:text-gray-300 w-[100px] cursor-pointer"/>
                                                 ) : (
                                                     <span>{exp.date}</span>
                                                 )}
-                                                {exp.time && <span className="ml-1">• {exp.time}</span>}
                                             </div>
                                             {exp.receipt && (
-                                                <img src={exp.receipt} alt="Receipt" className="mt-2 h-16 w-16 object-cover rounded border cursor-pointer" onClick={() => setViewingImage(exp.receipt)}/>
+                                                <img src={exp.receipt} alt="Receipt" className="mt-2 h-14 w-14 object-cover rounded border cursor-pointer" onClick={() => setViewingImage(exp.receipt)}/>
                                             )}
                                         </td>
-                                        <td className="p-4 text-right font-bold dark:text-gray-200">Rs. {Number(exp.amount).toLocaleString()}</td>
-                                        <td className="p-4 text-center">
+                                        <td className="p-3 align-top text-right font-bold dark:text-gray-200">
+                                            Rs. {Number(exp.amount).toLocaleString()}
+                                        </td>
+                                        <td className="p-2 align-top text-center">
                                             {canEdit ? (
                                                 <button onClick={() => deleteExpense(exp)} className="text-red-400 p-2"><i className="fa-solid fa-trash"></i></button>
                                             ) : (
-                                                <i className="fa-solid fa-lock text-gray-300"></i>
+                                                <i className="fa-solid fa-lock text-gray-300 mt-2"></i>
                                             )}
                                         </td>
                                     </tr>
                                     {viewingShoppingListId === exp.id && exp.items && (
                                         <tr className="bg-indigo-50/50 dark:bg-indigo-900/20">
-                                            <td colSpan="3" className="p-4 text-sm dark:text-gray-300">
-                                                <ul className="space-y-1">
+                                            <td colSpan="3" className="p-3 text-[11px] sm:text-sm dark:text-gray-300">
+                                                <ul className="space-y-1.5 w-full">
                                                     {exp.items.map((it, idx) => (
-                                                        <li key={idx} className="flex justify-between">
-                                                            <span>• {it.item}</span>
-                                                            <span>Rs. {it.price}</span>
+                                                        <li key={idx} className="flex justify-between items-center gap-2 border-b border-indigo-100 dark:border-gray-700/50 pb-1 last:border-0">
+                                                            <span className="truncate flex-1 font-medium">• {it.item} {it.quantity ? `(${it.quantity}${it.unit})` : ''}</span>
+                                                            <span className="whitespace-nowrap font-bold text-indigo-700 dark:text-indigo-300">Rs. {it.price}</span>
                                                         </li>
                                                     ))}
                                                 </ul>
