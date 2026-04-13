@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>අපේ ගිණුම්</title>
-  
   <script>
     window.onerror = function(msg, url, line) {
       if(msg.includes('Script error')) return true;
@@ -12,23 +11,19 @@
       return false;
     };
   </script>
-
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
-  
   <script>
     tailwind.config = {
       darkMode: 'class',
       theme: { extend: {} }
     }
   </script>
-
   <style>
     body { -webkit-tap-highlight-color: transparent; transition: background-color 0.3s; }
     .animate-fade-in { animation: fadeIn 0.3s ease-out; }
@@ -40,7 +35,6 @@
 </head>
 <body class="bg-slate-50 text-gray-800 font-sans dark:bg-gray-900 dark:text-gray-100 transition-colors">
   <div id="root"></div>
-
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
@@ -117,7 +111,6 @@
     const DonutChart = ({ data, title }) => {
         const total = data.reduce((sum, item) => sum + item.amount, 0);
         if(total === 0) return <p className="text-gray-400 text-xs text-center py-4">දත්ත නොමැත</p>;
-        
         let currentOffset = 0;
         
         return (
@@ -173,7 +166,7 @@
       const [pinInput, setPinInput] = useState("");
       const [userPins, setUserPins] = useState({});
       const [appSettings, setAppSettings] = useState(defaultSettings);
-
+      
       const [activeTab, setActiveTab] = useState('dashboard');
       const [currentMonth, setCurrentMonth] = useState(null);
       const [availableMonths, setAvailableMonths] = useState([]);
@@ -188,8 +181,7 @@
       const [themeColor, setThemeColor] = useState('blue');
       const [isDarkMode, setIsDarkMode] = useState(false);
       const [toasts, setToasts] = useState([]);
-      const [deferredPrompt, setDeferredPrompt] = useState(null);
-
+      
       const [newIncomeName, setNewIncomeName] = useState('');
       const [newShoppingItem, setNewShoppingItem] = useState('');
       const [newCategory, setNewCategory] = useState('');
@@ -197,7 +189,6 @@
       
       const [expensePayer, setExpensePayer] = useState('පොදු ගිණුමෙන්');
       const [shoppingPayer, setShoppingPayer] = useState('පොදු ගිණුමෙන්');
-
       const [shoppingReceipt, setShoppingReceipt] = useState(null);
       const [shoppingDate, setShoppingDate] = useState(getTodayDate());
       const [newPendingBill, setNewPendingBill] = useState({ name: '', amount: '', date: getTodayDate() });
@@ -214,22 +205,19 @@
         green: { primary: 'emerald-600', bg: 'emerald-50', text: 'emerald-900', hover: 'emerald-700' },
         red: { primary: 'rose-600', bg: 'rose-50', text: 'rose-900', hover: 'rose-700' }
       };
-      const th = themes[themeColor] || themes['blue'];
 
+      const th = themes[themeColor] || themes['blue'];
       const chartColors = ['#3b82f6', '#10b981', '#f43f5e', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#64748b', '#84cc16'];
 
       useEffect(() => {
         const timerId = setInterval(() => setCurrentTime(new Date()), 1000);
-        
         try {
             if (localStorage.getItem('theme') === 'dark') { 
                 setIsDarkMode(true); 
                 document.documentElement.classList.add('dark'); 
             }
             const savedColor = localStorage.getItem('themeColor');
-            if (savedColor && themes[savedColor]) {
-                setThemeColor(savedColor);
-            }
+            if (savedColor && themes[savedColor]) { setThemeColor(savedColor); }
         } catch (e) {}
 
         const handleVisibilityChange = () => {
@@ -331,7 +319,6 @@
           } else {
              setAppSettings(defaultSettings);
           }
-
           setIsLoading(false);
         }).catch(err => {
           setIsLoading(false);
@@ -369,67 +356,65 @@
          }
       }, [userNames, selectedLoginName]);
 
-      const userSummaries = useMemo(() => {
+      // නව ගණනය කිරීම: එක්ස්ට්‍රා එක මාසෙන් මාසෙට Carry Forward වීම සහ Base amount එක වෙන් කර ගැනීම
+      const enrichedIncomes = useMemo(() => {
+          if (!allData || !currentMonth) return [];
+          const validMonths = Object.keys(allData).filter(m => m <= currentMonth).sort();
+          
           return incomes.map(inc => {
               const name = inc.name || '';
               const cash = Number(inc.amount) || 0;
-              const goods = expenses
-                  .filter(e => e.payer === name && (!e.category || !e.category.includes('පියවීම')))
-                  .reduce((sum, e) => sum + Number(e.amount), 0);
               
-              const settled = expenses
-                  .filter(e => e.category === `${name}ගේ ඉතිරි පියවීම`)
-                  .reduce((sum, e) => sum + Number(e.amount), 0);
-                  
-              const totalGiven = cash + goods;
-              const expected = 15000;
-              // එක්ස්ට්‍රා = සම්පූර්ණ මුදල - 15000 - පියවූ මුදල
-              const extra = totalGiven - expected - settled;
+              let cumulativeGoods = 0;
+              let cumulativeSettled = 0;
               
-              return { ...inc, cash, goods, totalGiven, settled, extra };
+              validMonths.forEach(mId => {
+                  const mExpenses = allData[mId].expenses || [];
+                  const mGoods = mExpenses
+                      .filter(e => e.payer === name && (!e.category || !e.category.includes('පියවීම')))
+                      .reduce((sum, e) => sum + Number(e.amount), 0);
+                  const mSettled = mExpenses
+                      .filter(e => e.category === `${name}ගේ ඉතිරි පියවීම`)
+                      .reduce((sum, e) => sum + Number(e.amount), 0);
+                  cumulativeGoods += mGoods;
+                  cumulativeSettled += mSettled;
+              });
+              
+              // එක්ස්ට්‍රා = පරිශීලකයා තම අතින් ගෙනා බඩු (සහ වෙනත් වියදම්) - පොදු ගිණුමෙන් ඔහුට පියවූ මුදල
+              const extra = cumulativeGoods - cumulativeSettled;
+              return { ...inc, cash, extra };
           });
-      }, [incomes, expenses]);
+      }, [incomes, allData, currentMonth]);
 
-      const totalIncome = userSummaries.reduce((s, u) => s + u.totalGiven, 0);
+      // පොදු ගිණුමට ලැබුණු මුළු මුදල (Base Cash පමණක්)
+      const totalIncome = enrichedIncomes.reduce((s, u) => s + u.cash, 0);
+
       const totalShoppingPrice = shoppingList.reduce((s, c) => s + (Number(c.price) || 0), 0);
       const manualExpenses = expenses.reduce((s, c) => s + (Number(c.amount) || 0), 0);
-      const totalExpense = manualExpenses + totalShoppingPrice;
-      
+      const totalExpense = manualExpenses + totalShoppingPrice; // මේ මාසේ මුළු නිවසේ වියදම පෙන්වීමට
+
+      // මේ මාසේ පොදු ගිණුමෙන් ගිය වියදම් පමණක්
+      const thisMonthPoolExpenses = expenses
+          .filter(e => e.payer === 'පොදු ගිණුමෙන්' || !e.payer)
+          .reduce((s, e) => s + (Number(e.amount) || 0), 0);
+
       const broughtForward = useMemo(() => {
         if (!allData || !currentMonth) return 0;
-        const sortedMonths = Object.keys(allData).sort();
+        const sortedMonths = Object.keys(allData).filter(m => m < currentMonth).sort();
         let bal = 0;
         for (const mId of sortedMonths) {
-          if (mId === currentMonth) break; 
           const d = allData[mId];
           const mInc = (d.incomes || []).reduce((s, c) => s + (Number(c.amount)||0), 0);
-          let extraGoods = 0;
-          (d.expenses || []).forEach(e => {
-             if (e.payer && e.payer !== 'පොදු ගිණුමෙන්' && !e.category.includes('පියවීම')) {
-                 extraGoods += Number(e.amount);
-             }
-          });
-          const mExp = (d.expenses || []).reduce((s, c) => s + (Number(c.amount)||0), 0) + (d.shoppingList || []).reduce((s, c) => s + (Number(c.price)||0), 0);
-          bal += ((mInc + extraGoods) - mExp);
+          const mExpFromPool = (d.expenses || [])
+              .filter(e => e.payer === 'පොදු ගිණුමෙන්' || !e.payer)
+              .reduce((s, c) => s + (Number(c.amount)||0), 0);
+          bal += (mInc - mExpFromPool);
         }
         return bal;
       }, [allData, currentMonth]);
 
-      const balance = broughtForward + totalIncome - totalExpense;
-
-      const prevMonthData = useMemo(() => {
-        if (!availableMonths || availableMonths.length === 0 || !currentMonth) return null;
-        const sortedIds = [...availableMonths].sort().reverse();
-        const currentIndex = sortedIds.indexOf(currentMonth);
-        if(currentIndex !== -1 && currentIndex < sortedIds.length - 1) return allData[sortedIds[currentIndex + 1]];
-        return null;
-      }, [availableMonths, currentMonth, allData]);
-
-      const prevMonthExpense = prevMonthData ? 
-        (prevMonthData.expenses || []).reduce((s, c) => s + (Number(c.amount)||0), 0) + 
-        (prevMonthData.shoppingList || []).reduce((s, c) => s + (Number(c.price)||0), 0) : 0;
-      
-      const expenseDiff = prevMonthData ? totalExpense - prevMonthExpense : 0;
+      // පොදු ගිණුමේ ශේෂය = කලින් ඉතිරිය + මේ මාසේ Cash In - මේ මාසේ Cash Out
+      const balance = broughtForward + totalIncome - thisMonthPoolExpenses;
 
       const categoryTotals = useMemo(() => {
         const totals = {};
@@ -439,12 +424,12 @@
       }, [expenses, totalShoppingPrice]);
 
       const incomeChartData = useMemo(() => {
-          return userSummaries.filter(u => u.totalGiven > 0).map((u, idx) => ({
+          return enrichedIncomes.filter(u => u.cash > 0).map((u, idx) => ({
               name: u.name,
-              amount: u.totalGiven,
+              amount: u.cash,
               color: chartColors[idx % chartColors.length]
           })).sort((a, b) => b.amount - a.amount);
-      }, [userSummaries]);
+      }, [enrichedIncomes]);
 
       const expenseChartData = useMemo(() => {
           return categoryTotals.map((cat, idx) => ({
@@ -454,9 +439,32 @@
           })).sort((a, b) => b.amount - a.amount);
       }, [categoryTotals]);
 
+      // පියවීම් ලැයිස්තුව: සියලුම මාස වල දත්ත වලින් Extra > 0 වන අය
       const settlements = useMemo(() => {
-          return userSummaries.filter(u => u.extra > 0).map(u => ({ name: u.name, toSettle: u.extra }));
-      }, [userSummaries]);
+          if (!allData || !currentMonth) return [];
+          const allUsers = new Set();
+          const validMonths = Object.keys(allData).filter(m => m <= currentMonth).sort();
+          validMonths.forEach(mId => {
+              (allData[mId].incomes || []).forEach(inc => { if(inc.name) allUsers.add(inc.name); });
+              (allData[mId].expenses || []).forEach(exp => { if(exp.payer && exp.payer !== 'පොදු ගිණුමෙන්') allUsers.add(exp.payer); });
+          });
+          
+          const toSettle = [];
+          allUsers.forEach(name => {
+              let cumulativeGoods = 0;
+              let cumulativeSettled = 0;
+              validMonths.forEach(mId => {
+                  const mExpenses = allData[mId].expenses || [];
+                  cumulativeGoods += mExpenses.filter(e => e.payer === name && (!e.category || !e.category.includes('පියවීම'))).reduce((sum, e) => sum + Number(e.amount), 0);
+                  cumulativeSettled += mExpenses.filter(e => e.category === `${name}ගේ ඉතිරි පියවීම`).reduce((sum, e) => sum + Number(e.amount), 0);
+              });
+              const extra = cumulativeGoods - cumulativeSettled;
+              if (extra > 0) {
+                  toSettle.push({ name, toSettle: extra });
+              }
+          });
+          return toSettle;
+      }, [allData, currentMonth]);
 
       const globalStatement = useMemo(() => {
         const stmt = [];
@@ -487,7 +495,6 @@
       const addLog = (actionType, details, userOverride) => {
         const user = userOverride || currentUser;
         if (user === "Vajira") return; 
-
         const userPrefix = user ? `[${user}] ` : '';
         const newLog = { id: Date.now(), date: getTodayDate(), time: getCurrentTimeString(), action: actionType, details: userPrefix + details };
         updateLocalData('logs', [newLog, ...logs]);
@@ -514,7 +521,6 @@
       const handleLoginConfirm = () => {
          const finalName = selectedLoginName === 'NEW' ? customName.trim() : selectedLoginName;
          if (!pinInput.trim()) return showToast("කරුණාකර PIN අංකය ඇතුළත් කරන්න!", "error"); 
-
          if (userPins[finalName]) {
              if (userPins[finalName] === pinInput) {
                  setCurrentUser(finalName);
@@ -545,18 +551,17 @@
 
       const getReportText = () => {
           let text = `📊 *අපේ ගිණුම් - ${formatPeriodDisplay(currentMonth)}*\n\n`;
-          text += `💰 *ආදායම:* Rs. ${totalIncome.toLocaleString()}\n`;
-          text += `📉 *වියදම:* Rs. ${totalExpense.toLocaleString()}\n`;
+          text += `💰 *ලැබුණු ආදායම:* Rs. ${totalIncome.toLocaleString()}\n`;
+          text += `📉 *පොදු වියදම:* Rs. ${thisMonthPoolExpenses.toLocaleString()}\n`;
           text += `⚖️ *ඉතිරිය (Balance):* Rs. ${balance.toLocaleString()}\n\n`;
           
           if (categoryTotals.length > 0) {
-              text += `*--- වියදම් සාරාංශය ---*\n`;
+              text += `*--- වියදම් සාරාංශය (මුළු වියදම: Rs.${totalExpense.toLocaleString()}) ---*\n`;
               categoryTotals.forEach(cat => {
                   text += `▪ ${cat.name}: Rs. ${cat.amount.toLocaleString()}\n`;
               });
               text += `\n`;
           }
-
           text += `*--- සම්පූර්ණ ප්‍රකාශනය ---*\n`;
           const currentMonthStatements = globalStatement.filter(item => item.displayDate === currentMonth || (item.displayDate && item.displayDate.startsWith(currentMonth)));
           
@@ -643,7 +648,6 @@
         e.preventDefault();
         if (!canEdit || !newExpense.amount) return;
         const expAmt = Number(newExpense.amount);
-
         updateLocalData('expenses', [{ ...newExpense, payer: expensePayer, id: Date.now(), time: getCurrentTimeString() }, ...expenses]);
         
         addLog("වියදමක් එකතු කළා", `${newExpense.category} - Rs.${expAmt} (${expensePayer})`);
@@ -674,7 +678,6 @@
       };
 
       const handleShoppingItemChange = (id, field, value) => { if (!canEdit) return; updateLocalData('shoppingList', shoppingList.map(item => item.id === id ? { ...item, [field]: value } : item)); };
-
       const deleteShoppingItem = (id) => { if (canEdit) { updateLocalData('shoppingList', shoppingList.filter(item => item.id !== id)); } };
 
       const saveShoppingTrip = () => {
@@ -723,7 +726,6 @@
         if (isNaN(amount) || amount <= 0 || amount > amountToSettle) {
             return alert("කරුණාකර නිවැරදි මුදලක් ඇතුළත් කරන්න!");
         }
-
         const newExp = { id: Date.now(), category: `${name}ගේ ඉතිරි පියවීම`, amount: amount, payer: 'පොදු ගිණුමෙන්', date: getTodayDate(), time: getCurrentTimeString() };
         updateLocalData('expenses', [newExp, ...expenses]);
         
@@ -926,7 +928,7 @@
 
                 <div className="grid grid-cols-2 gap-4">
                     <div className="col-span-2 bg-gradient-to-br from-gray-800 to-gray-900 rounded-2xl p-6 shadow-lg text-white border-0">
-                        <p className="text-gray-300 text-sm font-bold mb-1">මේ මාසයේ ඉතිරිය</p>
+                        <p className="text-gray-300 text-sm font-bold mb-1">පොදු ගිණුමේ ඉතිරිය</p>
                         <h3 className={`text-4xl font-black ${balance < 0 ? 'text-red-400' : 'text-white'}`}>Rs. {balance.toLocaleString()}</h3>
                     </div>
                 </div>
@@ -941,7 +943,7 @@
                                 <div key={s.name} className="flex justify-between items-center bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-indigo-100 dark:border-gray-700">
                                     <div>
                                         <p className="font-bold text-sm dark:text-white">{s.name}ට පියවීමට</p>
-                                        <p className="text-xs text-gray-500">(රු.15,000 ට වඩා වැඩිපුර දුන් මුදල)</p>
+                                        <p className="text-xs text-gray-500">(ගිණුමට අමතරව වියදම් කළ මුදල)</p>
                                     </div>
                                     <div className="flex items-center gap-3">
                                         <span className="font-black text-indigo-600 dark:text-indigo-400">Rs. {s.toSettle.toLocaleString()}</span>
@@ -988,11 +990,10 @@
 
                 <div className="bg-white dark:bg-gray-800 p-5 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 mt-6 animate-fade-in">
                     <h3 className="text-gray-800 dark:text-white font-bold mb-2 flex items-center gap-2">
-                        <i className="fa-solid fa-chart-pie text-rose-500"></i> මේ මාසයේ වියදම් සාරාංශය
+                        <i className="fa-solid fa-chart-pie text-rose-500"></i> මුළු නිවසේ වියදම් සාරාංශය
                     </h3>
                     <DonutChart data={expenseChartData} title="මුළු වියදම" />
                 </div>
-
               </div>
             )}
 
@@ -1009,7 +1010,6 @@
                   )}
                   
                   <div className="overflow-x-auto pb-4">
-                      {/* අලුත්: බඩු සහ ඉදිරිය ඉවත් කර "එක්ස්ට්‍රා" තීරුව පමණක් ඇත */}
                       <table className="w-full text-left min-w-[400px]">
                           <thead>
                               <tr className="bg-gray-50 dark:bg-gray-700 border-b dark:border-gray-600 text-sm">
@@ -1020,7 +1020,7 @@
                               </tr>
                           </thead>
                           <tbody>
-                              {userSummaries.map((inc) => (
+                              {enrichedIncomes.map((inc) => (
                                   <tr key={inc.id} className="border-b dark:border-gray-700">
                                       <td className="p-3">
                                           <div className="font-bold dark:text-white text-base">{inc.name}</div>
@@ -1050,21 +1050,20 @@
                           </tbody>
                       </table>
                   </div>
-
                   <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700">
                       <div className="flex justify-between items-center text-sm font-bold text-gray-700 dark:text-gray-300">
-                          <span>මුළු ආදායම:</span>
+                          <span>පොදු ගිණුමට ලැබුණු මුදල:</span>
                           <span>Rs. {totalIncome.toLocaleString()}</span>
                       </div>
                       <div className="flex justify-between items-center text-sm font-bold text-gray-700 dark:text-gray-300 mt-1">
-                          <span>මුළු වියදම:</span>
-                          <span>Rs. {totalExpense.toLocaleString()}</span>
+                          <span>පොදු ගිණුමෙන් ගෙවූ වියදම්:</span>
+                          <span className="text-rose-500">Rs. {thisMonthPoolExpenses.toLocaleString()}</span>
                       </div>
                       <div className="border-t border-gray-300 dark:border-gray-600 my-2"></div>
                       <div className="flex justify-between items-center font-black text-lg">
                           <span className="dark:text-white">මේ මාසේ ශේෂය:</span>
-                          <span className={(totalIncome - totalExpense) < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}>
-                              {totalIncome - totalExpense < 0 ? '' : '+'} Rs. {(totalIncome - totalExpense).toLocaleString()}
+                          <span className={(totalIncome - thisMonthPoolExpenses) < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}>
+                              {totalIncome - thisMonthPoolExpenses < 0 ? '' : '+'} Rs. {(totalIncome - thisMonthPoolExpenses).toLocaleString()}
                           </span>
                       </div>
                   </div>
@@ -1112,7 +1111,6 @@
                                     {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                                 </select>
                             </div>
-
                             <div className="flex gap-2 items-center bg-indigo-50 dark:bg-gray-700 p-2.5 rounded-xl border border-indigo-100 dark:border-gray-600">
                                 <span className="text-sm font-bold text-indigo-800 dark:text-indigo-300 w-20 pl-1"><i className="fa-solid fa-user-tag"></i> ගෙව්වේ:</span>
                                 <select value={expensePayer} onChange={e => setExpensePayer(e.target.value)} className="p-2 border border-indigo-200 dark:border-gray-500 rounded-lg flex-1 outline-none dark:bg-gray-600 dark:text-white font-bold text-sm">
@@ -1120,7 +1118,6 @@
                                     {userNames.map(n => <option key={n} value={n}>{n}</option>)}
                                 </select>
                             </div>
-
                             <div className="flex gap-2 items-center">
                                 <input type="number" required placeholder="Rs" value={newExpense.amount} onChange={e => setNewExpense({...newExpense, amount: e.target.value})} className="p-3 border border-gray-300 dark:border-gray-600 rounded-xl w-1/2 outline-none dark:bg-gray-700 dark:text-white font-bold"/>
                                 <input type="date" value={newExpense.date} onChange={e => setNewExpense({...newExpense, date: e.target.value})} className="p-3 border border-gray-300 dark:border-gray-600 rounded-xl outline-none dark:bg-gray-700 dark:text-white text-sm w-1/3"/>
@@ -1332,7 +1329,6 @@
                        </div>
                        
                        <hr className="border-gray-200 dark:border-gray-700 mb-6"/>
-
                        {logs.length === 0 ? (
                            <p className="text-gray-500 text-center py-10">තවම කිසිවක් සටහන් වී නැත.</p>
                        ) : (
@@ -1411,7 +1407,6 @@
                                       {item.receipt && (
                                           <img src={item.receipt} alt="Receipt" className="h-16 w-16 object-cover rounded border border-gray-300 dark:border-gray-600 cursor-pointer" onClick={() => setViewingImage(item.receipt)}/>
                                       )}
-
                                       {(expandedStmt === item.id || expandedStmt === 'all') && item.items && (
                                           <div className="mt-1 w-full bg-gray-50 dark:bg-gray-900/50 p-3 rounded-xl border border-gray-100 dark:border-gray-700 text-sm animate-fade-in">
                                               {item.items.map((it, idx) => (
