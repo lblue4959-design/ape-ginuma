@@ -334,7 +334,21 @@
       const expenses = localData.expenses || [];
       const categories = localData.categories || [];
       const logs = localData.logs || [];
-      const pendingBills = localData.pendingBills || [];
+      
+      // දත්ත එකතු කිරීමේදී සියලුම මාසවල Pending Bills එකතු කර ලබා ගනී (Carry Forward Logic)
+      const allPendingBills = useMemo(() => {
+          if (!allData || !currentMonth) return [];
+          const sortedMonths = Object.keys(allData).sort();
+          let bills = [];
+          // තෝරාගත් මාසය දක්වා පවතින සියලුම pending bills එකතු කරමු
+          sortedMonths.forEach(mId => {
+              if (mId <= currentMonth) {
+                  const mBills = allData[mId].pendingBills || [];
+                  bills = [...bills, ...mBills.map(b => ({...b, sourceMonth: mId}))];
+              }
+          });
+          return bills;
+      }, [allData, currentMonth]);
 
       const realCurrentMonth = getCurrentPeriodId();
       const isPastMonth = currentMonth !== null && currentMonth < realCurrentMonth;
@@ -460,7 +474,6 @@
           return toSettle;
       }, [allData, currentMonth]);
 
-      // නව ප්‍රස්ථාර සඳහා දත්ත
       const settlementsChartData = useMemo(() => {
           return settlements.map((s, idx) => ({
               name: s.name,
@@ -470,12 +483,12 @@
       }, [settlements]);
 
       const pendingBillsChartData = useMemo(() => {
-          return pendingBills.map((b, idx) => ({
+          return allPendingBills.map((b, idx) => ({
               name: b.name,
               amount: Number(b.amount) || 0,
               color: chartColors[(idx + 8) % chartColors.length]
           })).sort((a, b) => b.amount - a.amount);
-      }, [pendingBills]);
+      }, [allPendingBills]);
 
       const globalStatement = useMemo(() => {
         const stmt = [];
@@ -490,17 +503,25 @@
         return stmt.sort((a, b) => b.id - a.id);
       }, [allData]);
 
-      const updateLocalData = (field, value) => {
-        setAllData(prev => ({ ...prev, [currentMonth]: { ...(prev[currentMonth] || defaultMonthData), [field]: value } }));
-        pendingUpdates.current[field] = value;
-        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = setTimeout(() => {
-          if (currentMonth && Object.keys(pendingUpdates.current).length > 0) {
-            const updates = { ...pendingUpdates.current };
-            pendingUpdates.current = {}; 
-            db.collection('artifacts').doc('ape-ginum-app').collection('public').doc('data').collection('months').doc(currentMonth).set(updates, { merge: true });
-          }
-        }, 1000);
+      const updateLocalData = (field, value, monthOverride) => {
+        const targetMonth = monthOverride || currentMonth;
+        setAllData(prev => ({ ...prev, [targetMonth]: { ...(prev[targetMonth] || defaultMonthData), [field]: value } }));
+        
+        // Firestore update logic
+        if (targetMonth === currentMonth) {
+            pendingUpdates.current[field] = value;
+            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = setTimeout(() => {
+                if (currentMonth && Object.keys(pendingUpdates.current).length > 0) {
+                    const updates = { ...pendingUpdates.current };
+                    pendingUpdates.current = {}; 
+                    db.collection('artifacts').doc('ape-ginum-app').collection('public').doc('data').collection('months').doc(currentMonth).set(updates, { merge: true });
+                }
+            }, 1000);
+        } else {
+            // වෙනත් මාසයක දත්තයක් නම් වහාම සේව් කරන්න
+            db.collection('artifacts').doc('ape-ginum-app').collection('public').doc('data').collection('months').doc(targetMonth).set({ [field]: value }, { merge: true });
+        }
       };
 
       const addLog = (actionType, details, userOverride) => {
@@ -711,7 +732,8 @@
       const handleAddPendingBill = (e) => {
         e.preventDefault();
         if (!canEdit || !newPendingBill.name || !newPendingBill.amount) return;
-        updateLocalData('pendingBills', [{...newPendingBill, id: Date.now()}, ...pendingBills]);
+        const currentPending = localData.pendingBills || [];
+        updateLocalData('pendingBills', [{...newPendingBill, id: Date.now()}, ...currentPending]);
         addLog("ගෙවීමට ඇති බිලක් දැම්මා", `${newPendingBill.name} - Rs.${newPendingBill.amount}`);
         setNewPendingBill({ name: '', amount: '', date: getTodayDate() });
         showToast("බිල සටහන් කළා");
@@ -720,11 +742,27 @@
       const payPendingBill = (bill) => {
         if (!canEdit) return;
         if(confirm(`"${bill.name}" ගෙවලා ඉවරයි කියලා සටහන් කරලා, වියදම් ලැයිස්තුවට දාන්නද?`)) {
+            // වියදම සටහන් වෙන්නේ දැන් බලන මාසයටයි.
             updateLocalData('expenses', [{ category: bill.name, amount: bill.amount, payer: 'පොදු ගිණුමෙන්', date: getTodayDate(), id: Date.now(), time: getCurrentTimeString() }, ...expenses]);
-            updateLocalData('pendingBills', pendingBills.filter(b => b.id !== bill.id));
+            
+            // මුල් මාසයෙන් Pending Bill එක ඉවත් කිරීම
+            const sourceMonthData = allData[bill.sourceMonth] || {};
+            const updatedPending = (sourceMonthData.pendingBills || []).filter(b => b.id !== bill.id);
+            updateLocalData('pendingBills', updatedPending, bill.sourceMonth);
+            
             addLog("බිලක් ගෙව්වා", `${bill.name} - Rs.${bill.amount}`);
             showToast("බිල ගෙවූ බව සටහන් විය");
         }
+      };
+
+      const deletePendingBill = (bill) => { 
+        if (canEdit && confirm("මෙය මකා දැමීමට අවශ්‍යද?")) { 
+            const sourceMonthData = allData[bill.sourceMonth] || {};
+            const updatedPending = (sourceMonthData.pendingBills || []).filter(b => b.id !== bill.id);
+            updateLocalData('pendingBills', updatedPending, bill.sourceMonth);
+            addLog("ගෙවීමට තිබූ බිලක් මැකුවා", bill.name); 
+            showToast("මකා දමන ලදී");
+        } 
       };
 
       const handleSettleUser = (name, amountToSettle) => {
@@ -743,8 +781,6 @@
         addLog("මුදල් පියෙව්වා", `${name}ට Rs.${amount.toLocaleString()} ක් පියවීම සටහන් විය`);
         showToast(`${name}ට රු.${amount.toLocaleString()} ක් පියවීම සටහන් විය`);
       };
-      
-      const deletePendingBill = (bill) => { if (canEdit && confirm("මෙය මකා දැමීමට අවශ්‍යද?")) { updateLocalData('pendingBills', pendingBills.filter(b => b.id !== bill.id)); addLog("ගෙවීමට තිබූ බිලක් මැකුවා", bill.name); } };
 
       const handleLogTabUnlock = (e) => { 
          e.preventDefault(); 
@@ -971,22 +1007,25 @@
                     </div>
                 )}
 
-                {pendingBills.length > 0 && (
+                {allPendingBills.length > 0 && (
                     <div className="bg-orange-50 dark:bg-orange-900/20 p-5 rounded-2xl shadow-sm border border-orange-200 dark:border-orange-800 mt-6 animate-fade-in">
                         <h3 className="text-orange-800 dark:text-orange-400 font-bold mb-3 flex items-center gap-2">
                             <i className="fa-solid fa-file-invoice-dollar"></i> ඉදිරියට ගෙවීමට ඇති බිල්පත්
                         </h3>
                         <div className="space-y-3 mb-4">
-                            {pendingBills.map(bill => (
+                            {allPendingBills.map(bill => (
                                 <div key={bill.id} className="flex justify-between items-center bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-orange-100 dark:border-gray-700">
                                     <div>
-                                        <p className="font-bold text-sm dark:text-white">{bill.name}</p>
+                                        <div className="flex items-center gap-2">
+                                            <p className="font-bold text-sm dark:text-white">{bill.name}</p>
+                                            <span className="text-[9px] bg-orange-100 text-orange-700 px-1.5 rounded-full font-black border border-orange-200">{bill.sourceMonth}</span>
+                                        </div>
                                         <p className="text-xs text-gray-500">{bill.date}</p>
                                     </div>
                                     <div className="flex items-center gap-3">
                                         <span className="font-black text-rose-600 dark:text-rose-400">Rs. {Number(bill.amount).toLocaleString()}</span>
                                         {canEdit && (
-                                            <button onClick={() => payPendingBill(bill)} className="bg-emerald-500 text-white text-[10px] px-3 py-1.5 rounded-lg font-bold">ගෙව්වා</button>
+                                            <button onClick={() => payPendingBill(bill)} className="bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] px-3 py-1.5 rounded-lg font-bold transition-colors">ගෙව්වා</button>
                                         )}
                                     </div>
                                 </div>
@@ -1101,12 +1140,13 @@
                             <button type="submit" className="bg-orange-600 text-white px-4 rounded-xl"><i className="fa-solid fa-plus"></i></button>
                         </form>
                     )}
-                    {pendingBills.length > 0 && (
+                    {/* මෙම මාසයේPending Bills පමණක් මෙහි පෙන්වයි */}
+                    {(localData.pendingBills || []).length > 0 && (
                         <div className="mt-4 space-y-2">
-                            {pendingBills.map(b => (
+                            {(localData.pendingBills || []).map(b => (
                                 <div key={b.id} className="flex justify-between items-center text-sm bg-white dark:bg-gray-700 p-2 rounded-lg border border-orange-100 dark:border-gray-600">
                                     <span className="font-bold dark:text-gray-200 text-gray-800">{b.name} <span className="text-rose-500 ml-2">Rs. {b.amount}</span></span>
-                                    {canEdit && <button onClick={() => deletePendingBill(b)} className="text-red-400 px-2"><i className="fa-solid fa-times"></i></button>}
+                                    {canEdit && <button onClick={() => deletePendingBill({...b, sourceMonth: currentMonth})} className="text-red-400 px-2"><i className="fa-solid fa-times"></i></button>}
                                 </div>
                             ))}
                         </div>
